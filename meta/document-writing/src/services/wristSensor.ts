@@ -1,4 +1,4 @@
-import type { SensorStatus, WristTelemetry } from '../types/document';
+import type { SensorStatus, WristMappingMode, WristTelemetry } from '../types/document';
 
 export type Vec3 = [number, number, number];
 export type Quat = [number, number, number, number]; // W3C standard [x, y, z, w]
@@ -106,7 +106,6 @@ function normalize(v: Vec3): Vec3 {
  * for desktop/simulator 3D wrist emulation.
  */
 export function eulerToW3CQuat(yawRad: number, pitchRad: number, rollRad: number): Quat {
-  // Intrinsic Z (yaw) -> X (pitch) -> Y (roll)
   const cz = Math.cos(yawRad * 0.5);
   const sz = Math.sin(yawRad * 0.5);
   const cx = Math.cos(pitchRad * 0.5);
@@ -154,6 +153,8 @@ export interface PointingBasis {
   refDir: Vec3;
   rightAxis: Vec3;
   upAxis: Vec3;
+  refDorsal: Vec3;
+  horizForward: Vec3;
   refTwist: number;
 }
 
@@ -166,37 +167,58 @@ export function createPointingBasis(q: Quat): PointingBasis {
     rightAxis = normalize(rightAxis);
   }
   const upAxis = normalize(cross(rightAxis, refDir));
+  const refDorsal = normalize(rotate(q, [0, 0, 1]));
+  const horizLen = Math.hypot(refDir[0], refDir[1]);
+  const horizForward: Vec3 =
+    horizLen > 1e-3 ? [refDir[0] / horizLen, refDir[1] / horizLen, 0] : [0, 1, 0];
+
   return {
     refDir,
     rightAxis,
     upAxis,
+    refDorsal,
+    horizForward,
     refTwist: gravityRollAngle(q),
   };
 }
 
 /**
- * Project current pointing vector onto the anchored local screen plane.
- * Returns normalized screen deflections: +dx is right, +dy is down (canvas coordinates).
+ * Project current pointing vector onto the anchored screen plane:
+ * - 'stretched-arm': vertical plane tracking (moving arm left -> -dx, up -> -dy).
+ * - 'horizontal-surface': table drawing tracking (left/right across table, reaching forward
+ *   away from body -> cursor up (-dy), pulling back toward body -> cursor down (+dy)).
  */
 export function projectPointingDelta(
   q: Quat,
   basis: PointingBasis,
+  mappingMode: WristMappingMode = 'stretched-arm',
 ): { dx: number; dy: number; rollRad: number } {
   const dir = normalize(pointingDirection(q));
   const dx = -dot(dir, basis.rightAxis);
-  const dy = -dot(dir, basis.upAxis);
   const rollRad = wrapAngle(gravityRollAngle(q) - basis.refTwist);
+
+  if (mappingMode === 'horizontal-surface') {
+    const dorsal = normalize(rotate(q, [0, 0, 1]));
+    const forwardTilt =
+      dot(dorsal, basis.horizForward) - dot(basis.refDorsal, basis.horizForward);
+    const dy = dot(dir, basis.upAxis) - forwardTilt * 0.75;
+    return { dx, dy, rollRad };
+  }
+
+  const dy = -dot(dir, basis.upAxis);
   return { dx, dy, rollRad };
 }
 
 export interface WristSensorOptions {
   onReading: (telemetry: WristTelemetry) => void;
   onStatusChange?: (status: SensorStatus) => void;
+  initialMappingMode?: WristMappingMode;
 }
 
 export class WristSensorController {
   private sensor: GenericRelativeOrientationSensor | null = null;
   private status: SensorStatus = 'checking';
+  private mappingMode: WristMappingMode;
   private pollTimer: number | null = null;
   private retryTimer: number | null = null;
   private retryCount = 0;
@@ -217,6 +239,20 @@ export class WristSensorController {
   constructor(options: WristSensorOptions) {
     this.onReading = options.onReading;
     this.onStatusChange = options.onStatusChange;
+    this.mappingMode = options.initialMappingMode ?? 'stretched-arm';
+  }
+
+  public setMappingMode(mode: WristMappingMode): void {
+    if (this.mappingMode === mode) return;
+    this.mappingMode = mode;
+    if (this.latestW3C) {
+      this.basis = createPointingBasis(this.latestW3C);
+      this.smoothDx = 0;
+      this.smoothDy = 0;
+      this.smoothRoll = 0;
+      this.hasSmoothSample = false;
+      this.emitTelemetry();
+    }
   }
 
   public start(): void {
@@ -244,7 +280,6 @@ export class WristSensorController {
           this.pollTimer = null;
         }
         this.setStatus('unavailable-sim');
-        // Seed neutral rest pose for simulator/desktop mode
         this.pushSimulatedEuler(0, 0, 0);
       }
     }, 250);
@@ -282,7 +317,13 @@ export class WristSensorController {
   }
 
   public clearReference(): void {
-    this.basis = null;
+    // Re-center basis on current pose instead of dropping deltaPointing so continuous
+    // crosshair hover in Drawing mode continues tracking smoothly.
+    if (this.latestW3C) {
+      this.basis = createPointingBasis(this.latestW3C);
+    } else {
+      this.basis = null;
+    }
     this.smoothDx = 0;
     this.smoothDy = 0;
     this.smoothRoll = 0;
@@ -309,10 +350,12 @@ export class WristSensorController {
   public pushSimulatedEuler(yawRad: number, pitchRad: number, rollRad: number): void {
     this.isSimulating = true;
     const qW3C = eulerToW3CQuat(yawRad, pitchRad, rollRad);
-    // Store raw as w-first just like the real emg-wrist runtime does
     this.latestRaw = [qW3C[3], qW3C[0], qW3C[1], qW3C[2]];
     this.latestW3C = toW3C(this.latestRaw);
     this.latestTimestamp = performance.now();
+    if (!this.basis && this.latestW3C) {
+      this.basis = createPointingBasis(this.latestW3C);
+    }
     this.emitTelemetry();
   }
 
@@ -348,6 +391,10 @@ export class WristSensorController {
         this.latestRaw = [raw[0], raw[1], raw[2], raw[3]];
         this.latestW3C = w3c;
         this.latestTimestamp = sensor.timestamp ?? performance.now();
+
+        if (!this.basis) {
+          this.basis = createPointingBasis(w3c);
+        }
 
         if (this.status !== 'live') {
           this.setStatus('live');
@@ -405,7 +452,8 @@ export class WristSensorController {
   private emitTelemetry(): void {
     const q = this.latestW3C;
     const pointing = q ? pointingDirection(q) : null;
-    const rawDelta = q && this.basis ? projectPointingDelta(q, this.basis) : null;
+    const rawDelta =
+      q && this.basis ? projectPointingDelta(q, this.basis, this.mappingMode) : null;
 
     let smoothedDelta: { dx: number; dy: number } | null = null;
     if (rawDelta) {
@@ -415,10 +463,9 @@ export class WristSensorController {
         this.smoothRoll = rawDelta.rollRad;
         this.hasSmoothSample = true;
       } else {
-        // Adaptive low-pass filter: strong tremor damping on tiny motions,
-        // responsive tracking on deliberate arm sweeps.
         const stepDist = Math.hypot(rawDelta.dx - this.smoothDx, rawDelta.dy - this.smoothDy);
-        const alpha = stepDist < 0.015 ? 0.14 : Math.min(0.42, 0.14 + (stepDist - 0.015) * 3.5);
+        const alpha =
+          stepDist < 0.015 ? 0.14 : Math.min(0.42, 0.14 + (stepDist - 0.015) * 3.5);
         this.smoothDx += alpha * (rawDelta.dx - this.smoothDx);
         this.smoothDy += alpha * (rawDelta.dy - this.smoothDy);
         this.smoothRoll = wrapAngle(

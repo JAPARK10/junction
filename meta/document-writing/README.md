@@ -1,57 +1,66 @@
-# NeuralDoc — Meta Ray-Ban Display Document Creator & 3D Wrist Sketchpad
+# NeuralDoc — A4 Document Explorer & Meta Neural Band Workspace
 
-A Word-like document creation and spatial wrist-drawing web app built specifically for **Meta Ray-Ban Display glasses (600×600 additive display)** and controlled entirely with the **Meta Neural Band (wristband)**.
+An A4 document explorer, viewer, spatial sketchpad, and writer web app built specifically for **Meta Ray-Ban Display glasses (600×600 additive display)** and controlled with the **Meta Neural Band (wristband)**.
 
-## Wristband Control Mapping
+## Operating Structure & Controls
 
-| Wristband Control | Web Event / Sensor Surface | App Action |
-|---|---|---|
-| **Swipe Up / Down** | Native spatial navigation (`ArrowUp` / `ArrowDown`, not `preventDefault()`ed in Document mode) | Scroll/move browser focus cleanly between `#document-sheet`, `#plain-glasses-test-input`, and `#neural-writer-input`; **inside Toolbar**, cycles/toggles the selected item's options (e.g. `P/H1/H2/BULLET/QUOTE`, `Bold On/Off`, `Ink Color`) |
-| **Swipe Left / Right** | `ArrowLeft` / `ArrowRight` | Step cursor left/right inside the active line; **inside Toolbar**, switch between toolbar categories |
-| **Click / 1x Index Tip Tap** | Native `Enter` when a text field is focused; or `Enter` in Document mode | When `#plain-glasses-test-input` or `#neural-writer-input` is selected, `Enter` passes 100% natively to Chromium WebView to open Meta's in-built **System Composer** (handwriting / dictation / on-screen keyboard); from Document mode, focuses `#neural-writer-input`; inside Toolbar, applies/toggles focused option |
-| **2x Index Finger Tip Tap** | `Enter` × 2 or double tap | Insert a new line/paragraph at the cursor (or exit Toolbar) |
-| **3x Index Finger Tip Tap** | `Enter` × 3 or triple tap (`450 ms` window), or `Menu` button | Open / close the **Word Formatting & Ink Toolbar** (`Style`, `Bold`, `Italic`, `Ink Color`, `Pen Size`, `Undo`, `Export`, etc.) |
-| **1x Tap & Hold + Move Wrist** | `Enter` or pointer held (`≥260 ms`) + move forearm in 3D (`emg-wrist`) | Anchor 3D forearm orientation (`FOREARM_AXIS = [0,1,0]`) and draw stabilized ink strokes (`sensitivity = 350`, adaptive EMA + `4 px` lazy-brush deadband) |
-| **1x Tap & Hold + Rotate Arm Left / Right** | `Enter` held (`≥260 ms`) + twist forearm roll (`emg-wrist` gravity-anchored roll) | Camera-zoom cursor scrubbing along the active line in Document mode |
-| **2x Tap & Hold (Hold 2nd Tap) + Move Wrist** | Quick tip tap followed by `Enter` or pointer held (`≥260 ms`) + move wrist over ink | Activate **Eraser** (`ERASE_HOLD`, `16 px` reticle) and erase all ink strokes it touches; reverts cleanly in one step via `Ctrl+Z` / `2x Side Tap` / `↩ Undo` |
-| **1x Index Finger Side Tap** | `Escape` / `Backspace` | Delete character before cursor (or close Toolbar) |
-| **2x Index Finger Side Tap / `Ctrl+Z`** | `Escape` × 2 / `Backspace` × 2, `Ctrl+Z` / `Cmd+Z`, or `↩ Undo` button | Undo last drawing stroke or text edit |
+### 1. Explorer Menu (`MENU`) & Settings (`SETTINGS`)
+- **Horizontal A4 Document Cards**: Displays saved numbered A4 sheets (`Document 1`, `Document 2`, …) with live white A4 thumbnails (`560×792` scaled), pinned documents kept first, and a rightmost **`+ New Document`** empty white A4 card.
+- **Navigation**:
+  - **Swipe Left / Right**: Move across document cards.
+  - **Swipe Up / Down**: Move focus up to the top-right **⚙️ Settings** gear icon (or back down to cards).
+  - **1x Tip Tap**: Open the selected document (always enters **View Mode**), create a new empty white A4 sheet, or open Settings.
+  - **1x Tip Hold** on a card: Opens **`📌 Pin / Unpin`** and **`🗑️ Delete`** card actions (Swipe Left/Right to choose, `1x Tip Tap` to apply; Delete asks for confirmation).
+- **Settings Screen**:
+  - **A4 Paper Appearance**: Switch between **Transparent Mode** (dark transparent HUD glass) and **Light Mode (White A4)** (plain `#ffffff` A4 sheet).
+  - **Wristband Coordinate Mapping**: Switch between **Stretched out arm** (air drawing vertical plane) and **Draw on horizontal surface** (table drawing: reaching forward/back maps vertically along Y, left/right maps along X).
+  - **Middle Finger / Back**: Steps back from confirmations/overlays up to Menu, or returns from Settings to Menu.
 
-## Exposed Wristband APIs & Native Glasses Text Selection
+---
 
-1. **3D Wrist Orientation (`emg-wrist`)** (`src/services/wristSensor.ts`):
-   - Feature-detects via `window.RelativeOrientationSensor.__imuQuatWrapped === true` (polling up to 4 s after load while the glasses runtime injects the marker).
-   - Reorders incoming `[w, x, y, z]` readings once at the boundary (`toW3C`) to W3C `[x, y, z, w]`.
-   - Rotates `FOREARM_AXIS = [0, 1, 0]` into world space (`pointingDirection`), projects onto a reference pointing basis captured at the start of each Hold-to-Draw gesture (no Euler gimbal lock, immune to heading drift), and applies adaptive EMA low-pass smoothing (`alpha` 0.14–0.42) paired with a `4 px` lazy-brush deadband in `src/App.tsx`.
-   - Extracts continuous wrist roll via `gravityRollAngle` for camera-zoom cursor scrubbing while keeping ink stroke width constant per selected `Pen Size`.
-2. **Native Glasses System Composer + Standalone Plain Test Field** (`src/components/NeuralComposer.tsx`, `src/hooks/useWristbandControls.ts`):
-   - Clean spatial focus order across just three targets: `#document-sheet` (`tabIndex={0}`), `#plain-glasses-test-input` (100% vanilla uncontrolled `<input type="text">` with zero React handlers), and `#neural-writer-input` (uncontrolled `<input type="text">` committing text via native `change` / `Enter` directly into the document cursor). All non-text HUD buttons (`tabIndex={-1}`) stay out of Chromium spatial navigation unless `TOOLBAR` mode is open.
-   - When an `<input>` or `<textarea>` is targeted or focused, `useWristbandControls.ts` returns immediately in `onKeyDown`/`onKeyUp` without calling `preventDefault()`, allowing native directional navigation (`ArrowUp`/`ArrowDown`) and Click (`Enter`) activation of Meta's in-built System Composer.
-   - **Live Capability & Raw Event Probe**: compact `Probe` bar displaying `emg-wrist` status, live `document.activeElement`, Web API support, and raw `focusin`, `input`, `change`, `beforeinput`, `composition*`, and `keydown` events.
-3. **Continuous Pinch-and-Drag Opt-In** (`src/styles.css`):
-   - Declares `body { touch-action: none; }` in the initial stylesheet and uses `setPointerCapture` on `pointerdown` / `pointermove` / `pointerup`.
+### 2. Document View Modes & Bottom Mode Bar (`DOCUMENT`)
+Opening any document always starts in **View Mode**. A bottom Mode Bar (`🔍 View Mode`, `✏️ Drawing Mode`, `📝 Writing Mode`) is always visible:
+- **Switch Modes (`2x Tip Hold + Rotate Arm Left / Right`)**:
+  - Double-tap and hold the second tap, then rotate your forearm left/right to hover across the 3 modes.
+  - Release the hold, then **`1x Tip Tap`** to confirm the hovered mode, or **Middle Finger / Back** to cancel and stay in the previous mode.
+  - *(In Drawing Mode, `2x Hold + Translate` enters **Eraser**, while `2x Hold + Forearm Roll ≥ 6°` enters the **Mode Switcher**.)*
+
+#### Mode 1 — View Mode (`🔍 View Mode`)
+- **`1x Tip Hold + Rotate Arm Left / Right`**: Zoom out (down to full A4 sheet at `1.0x`) and zoom in (up to `3.5x`).
+- **`1x Tip Hold + Move Wrist`** (or pointer drag): Pan around the zoomed A4 page.
+- **Top-Right Minimap**: Always displays the full A4 document thumbnail with a live **red viewport rectangle** shrinking, growing, and moving with zoom and pan.
+
+#### Mode 2 — Drawing Mode (`✏️ Drawing Mode`)
+- **Continuous Pen Crosshair**: Moves with your forearm in 3D space even when not holding to draw (`2x Tip Tap` re-centers at current pose).
+- **`1x Tip Hold + Move Wrist`**: Draws with the active brush or drags out the selected shape (`circle`, `rectangle`, `triangle`, `arrow` — colored outline, transparent fill).
+- **`2x Tip Hold + Move Wrist`**: Activates the **Eraser** (`16 px` reticle) and erases any ink strokes or shapes touched.
+- **Unfolded 2-Level Drawing Tree Toolbar**:
+  - **Line thickness**: `2px`, `4px`, `7px`, `11px`, `16px`
+  - **Color**: 20-color palette (`10×2` grid)
+  - **Brush type**: `Standard Pen`, `Brush`, `Spray Paint`, `Fill Color` (fills drawn loop interior)
+  - **Add Shape**: `Circle`, `Rectangle`, `Triangle`, `Arrow`
+  - **Fill color**: 20-color palette for filled strokes
+  - Selecting a top-level item unfolds its sub-options in place; **Middle Finger / Back** steps back to top level, or out to Menu when at top level.
+
+#### Mode 3 — Writing Mode (`📝 Writing Mode`)
+- **Swipe Up / Down**: Move cursor between text lines on the A4 sheet.
+- **`1x Tip Hold + Rotate Arm Left / Right`**: Scrub the text cursor left/right along the current line.
+- **Unfolded 2-Level Writing Tree Toolbar**:
+  - **Text Style**: `Headline 1`, `Headline 2`, `Subheadline`, `Normal Text`, `Quote`
+  - **Formatting**: `Bold`, `Italic`, `Underline`
+  - **Size**: `12pt`, `15pt`, `18pt`, `22pt`, `28pt`
+  - **Bullet Points**: `• Bullet Points`, `1. Numbered List`, `Normal Paragraph`
+  - **Glasses Input**: Focuses `#neural-writer-input` (uncontrolled native `<input>` for Meta System Composer / voice / handwriting), plus `↵ Line`, `⌫`, `↩ Undo`, and capability `Probe`.
+- **Undo (`Ctrl+Z` / `3x Tip Tap` / `↩`)**: Reverts document strokes, shapes, or text edits per document.
 
 ## Running Locally & Testing
 
 ```bash
 npm install
+npm run typecheck
 npm run build
 npm run preview -- --host 127.0.0.1 --port 4173
 ```
 
-### 1. Test in Desktop Chrome or Meta Ray-Ban Display Simulator
-1. Install the **Meta Ray-Ban Display Simulator** Chrome extension (`https://chromewebstore.google.com/detail/jpjlmmodokemlepklkdbimceggpbjcll`).
-2. Open `http://127.0.0.1:4173/` and toggle the extension on to preview the 600×600 additive display (pure `#000000` renders transparent).
-3. Use arrow keys / `Enter` / `Escape` or the built-in **Band Sim** drawer to test 4-way swipes, 1x/2x/3x tip taps, side taps, and simulated 3D wrist coordinates (`Hold Tip & Move Wrist` or `Demo Wrist Loop`).
-
-### 2. Test on Physical Meta Ray-Ban Display Glasses (HTTPS Required)
-Web apps running on physical Meta Ray-Ban Display glasses **must be served over a publicly reachable HTTPS URL** (for example via **Vercel** using the included `vercel.json`, or a temporary HTTPS tunnel such as Cloudflare Tunnel `cloudflared tunnel --url http://127.0.0.1:4173` / `ngrok http 4173`).
-
-1. Deploy `document-writing` to Vercel (`npx vercel --prod`) or expose local preview over HTTPS.
-2. On your paired phone, open the **Meta AI app** → enable **Developer Mode** → **Display Glasses settings → App connections → Web apps → Add a web app** (or scan a QR deep link generated by the Meta Ray-Ban Display Simulator extension) and paste your HTTPS URL.
-3. Hardware troubleshooting links (if glasses or Neural Band won't pair or are bound to another account):
-   - Glasses Factory Reset: https://www.meta.com/en-gb/help/ai-glasses/814846737027479/
-   - Meta Neural Band Factory Reset: https://www.meta.com/en-gb/help/ai-glasses/1481163499576351/
-   - Glasses Pairing Help: https://www.meta.com/en-gb/help/ai-glasses/852077233025627/
-   - Meta Neural Band Pairing Help: https://www.meta.com/en-gb/help/ai-glasses/770840295349358/
-
+1. **Meta Ray-Ban Display Simulator Extension (Desktop)**: Open `http://127.0.0.1:4173/` and use either the Chrome extension (`600×600` additive frame) or the built-in **Band Sim** drawer (`600×600` toggle, `Swipes`, `Tip 1x / 2x`, `Middle Back`, `1x Hold`, `2x Hold`, and `Yaw / Pitch / Roll` sliders).
+2. **Physical Glasses**: Serve over HTTPS (GitHub Pages or Vercel) and open via Meta AI app → Developer Mode → App connections → Web apps.

@@ -1,22 +1,30 @@
 import { useEffect, useRef, useState } from 'react';
-import type { GestureEventRecord, InteractionMode, WristTelemetry } from '../types/document';
+import type {
+  AppScreen,
+  DocInteractionMode,
+  GestureEventRecord,
+  WristMappingMode,
+  WristTelemetry,
+} from '../types/document';
 
 interface WristTelemetryHudProps {
   telemetry: WristTelemetry;
-  mode: InteractionMode;
+  screen: AppScreen;
+  docMode: DocInteractionMode;
+  wristMappingMode: WristMappingMode;
   lastGesture: GestureEventRecord | null;
   simulatorFrame: boolean;
   showEmulatorPanel: boolean;
   onToggleSimulatorFrame: () => void;
   onToggleEmulatorPanel: () => void;
   onSimulatedPose: (yawDeg: number, pitchDeg: number, rollDeg: number) => void;
-  onStartHoldDrawSim: () => void;
-  onEndHoldDrawSim: () => void;
-  onStartHoldEraseSim: () => void;
-  onEndHoldEraseSim: () => void;
+  onStartHold1Sim: () => void;
+  onEndHold1Sim: () => void;
+  onStartHold2Sim: () => void;
+  onEndHold2Sim: () => void;
   onSimSwipe: (dir: 'up' | 'down' | 'left' | 'right') => void;
   onSimTipTap: (count: 1 | 2 | 3) => void;
-  onSimSideTap: (count: 1 | 2) => void;
+  onSimMiddleFingerBack: () => void;
 }
 
 function formatVec(vals: readonly number[] | null, digits = 2): string {
@@ -26,26 +34,28 @@ function formatVec(vals: readonly number[] | null, digits = 2): string {
 
 export function WristTelemetryHud({
   telemetry,
-  mode,
+  screen,
+  docMode,
+  wristMappingMode,
   lastGesture,
   simulatorFrame,
   showEmulatorPanel,
   onToggleSimulatorFrame,
   onToggleEmulatorPanel,
   onSimulatedPose,
-  onStartHoldDrawSim,
-  onEndHoldDrawSim,
-  onStartHoldEraseSim,
-  onEndHoldEraseSim,
+  onStartHold1Sim,
+  onEndHold1Sim,
+  onStartHold2Sim,
+  onEndHold2Sim,
   onSimSwipe,
   onSimTipTap,
-  onSimSideTap,
+  onSimMiddleFingerBack,
 }: WristTelemetryHudProps) {
   const [yawDeg, setYawDeg] = useState(0);
   const [pitchDeg, setPitchDeg] = useState(0);
   const [rollDeg, setRollDeg] = useState(0);
-  const [simHoldingDraw, setSimHoldingDraw] = useState(false);
-  const [simHoldingErase, setSimHoldingErase] = useState(false);
+  const [simHolding1, setSimHolding1] = useState(false);
+  const [simHolding2, setSimHolding2] = useState(false);
   const waveRafRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -69,8 +79,8 @@ export function WristTelemetryHud({
       waveRafRef.current = null;
     }
     onSimulatedPose(0, 0, 0);
-    onStartHoldDrawSim();
-    setSimHoldingDraw(true);
+    onStartHold1Sim();
+    setSimHolding1(true);
 
     const start = performance.now();
     const duration = 2000;
@@ -83,7 +93,7 @@ export function WristTelemetryHud({
         const angle = t * Math.PI * 2;
         const y = Math.sin(angle) * 16;
         const p = Math.cos(angle) * 12;
-        const r = Math.sin(angle * 2) * 20;
+        const r = Math.sin(angle * 2) * 15;
         setYawDeg(Math.round(y));
         setPitchDeg(Math.round(p));
         setRollDeg(Math.round(r));
@@ -94,8 +104,8 @@ export function WristTelemetryHud({
         waveRafRef.current = window.requestAnimationFrame(tick);
       } else {
         waveRafRef.current = null;
-        setSimHoldingDraw(false);
-        onEndHoldDrawSim();
+        setSimHolding1(false);
+        onEndHold1Sim();
       }
     };
 
@@ -104,34 +114,36 @@ export function WristTelemetryHud({
 
   const statusBadge =
     telemetry.status === 'live'
-      ? { label: 'EMG-WRIST LIVE', cls: 'badge-live' }
+      ? { label: 'EMG LIVE', cls: 'badge-live' }
       : telemetry.status === 'not-worn'
-        ? { label: 'BAND NOT WORN', cls: 'badge-warn' }
+        ? { label: 'NOT WORN', cls: 'badge-warn' }
         : telemetry.status === 'permission-denied'
-          ? { label: 'SENSOR DENIED', cls: 'badge-warn' }
+          ? { label: 'DENIED', cls: 'badge-warn' }
           : telemetry.status === 'checking'
-            ? { label: 'SCANNING BAND…', cls: 'badge-dim' }
-            : { label: 'SIMULATOR MODE', cls: 'badge-sim' };
+            ? { label: 'SCAN…', cls: 'badge-dim' }
+            : { label: 'SIM', cls: 'badge-sim' };
+
+  const modeLabel =
+    screen === 'MENU'
+      ? 'EXPLORER MENU'
+      : screen === 'SETTINGS'
+        ? 'SETTINGS'
+        : docMode === 'DRAW'
+          ? 'DRAWING MODE'
+          : docMode === 'WRITE'
+            ? 'WRITING MODE'
+            : 'VIEW MODE';
 
   return (
     <div className="hud-wrapper">
       <div className="status-strip">
         <span className={`sensor-pill ${statusBadge.cls}`}>{statusBadge.label}</span>
-        <span className={`mode-pill mode-${mode.toLowerCase()}`}>
-          {mode === 'DRAW_HOLD'
-            ? 'DRAW (1x HOLD)'
-            : mode === 'ERASE_HOLD'
-              ? 'ERASER (2x HOLD)'
-              : mode === 'CURSOR_SCRUB'
-                ? 'CURSOR ZOOM (ROTATE ARM)'
-                : mode === 'COMPOSER'
-                  ? 'NEURAL WRITE'
-                  : mode === 'TOOLBAR'
-                    ? 'WORD TOOLBAR'
-                    : 'DOC CURSOR'}
+        <span className="mode-pill">{modeLabel}</span>
+        <span className="mapping-chip">
+          {wristMappingMode === 'horizontal-surface' ? 'Table' : 'Arm'}
         </span>
         <span className="gesture-echo" aria-live="polite">
-          {lastGesture ? `${lastGesture.label}: ${lastGesture.detail}` : 'Ready for wristband'}
+          {lastGesture ? `${lastGesture.label}: ${lastGesture.detail}` : 'Ready'}
         </span>
         <div className="hud-actions">
           <button
@@ -148,7 +160,7 @@ export function WristTelemetryHud({
             className="hud-mini-btn"
             onClick={onToggleEmulatorPanel}
           >
-            {showEmulatorPanel ? 'Hide Band Sim' : 'Band Sim'}
+            {showEmulatorPanel ? 'Hide Sim' : 'Band Sim'}
           </button>
         </div>
       </div>
@@ -157,15 +169,11 @@ export function WristTelemetryHud({
         <section className="emulator-drawer" aria-label="Meta Neural Band 3D and Gesture Simulator">
           <div className="telemetry-grid">
             <div>
-              <span className="tele-key">W3C Quat [x,y,z,w]</span>
+              <span className="tele-key">W3C Quat</span>
               <code className="tele-val">{formatVec(telemetry.w3cQuat)}</code>
             </div>
             <div>
-              <span className="tele-key">Forearm Pointing (+Y)</span>
-              <code className="tele-val">{formatVec(telemetry.pointing)}</code>
-            </div>
-            <div>
-              <span className="tele-key">Draw Delta / Roll</span>
+              <span className="tele-key">Delta ({wristMappingMode})</span>
               <code className="tele-val">
                 {telemetry.deltaPointing
                   ? `${telemetry.deltaPointing.dx.toFixed(2)}, ${telemetry.deltaPointing.dy.toFixed(2)}`
@@ -177,77 +185,75 @@ export function WristTelemetryHud({
 
           <div className="sim-controls-row">
             <div className="sim-cluster">
-              <span className="sim-cluster-title">Swipes (4-Way)</span>
+              <span className="sim-cluster-title">Swipes</span>
               <div className="sim-btn-group">
-                <button type="button" tabIndex={-1} onClick={() => onSimSwipe('up')}>↑ Up</button>
-                <button type="button" tabIndex={-1} onClick={() => onSimSwipe('down')}>↓ Down</button>
-                <button type="button" tabIndex={-1} onClick={() => onSimSwipe('left')}>← Left</button>
-                <button type="button" tabIndex={-1} onClick={() => onSimSwipe('right')}>→ Right</button>
+                <button type="button" tabIndex={-1} onClick={() => onSimSwipe('up')}>↑</button>
+                <button type="button" tabIndex={-1} onClick={() => onSimSwipe('down')}>↓</button>
+                <button type="button" tabIndex={-1} onClick={() => onSimSwipe('left')}>←</button>
+                <button type="button" tabIndex={-1} onClick={() => onSimSwipe('right')}>→</button>
               </div>
             </div>
 
             <div className="sim-cluster">
-              <span className="sim-cluster-title">Index Tip &amp; Side Taps</span>
+              <span className="sim-cluster-title">Taps &amp; Middle Finger</span>
               <div className="sim-btn-group">
                 <button type="button" tabIndex={-1} onClick={() => onSimTipTap(1)}>Tip 1x</button>
                 <button type="button" tabIndex={-1} onClick={() => onSimTipTap(2)}>Tip 2x</button>
-                <button type="button" tabIndex={-1} onClick={() => onSimTipTap(3)}>Tip 3x</button>
-                <button type="button" tabIndex={-1} onClick={() => onSimSideTap(1)}>Side 1x</button>
-                <button type="button" tabIndex={-1} onClick={() => onSimSideTap(2)}>Side 2x</button>
+                <button type="button" tabIndex={-1} onClick={onSimMiddleFingerBack}>Middle Back</button>
               </div>
             </div>
 
             <div className="sim-cluster">
-              <span className="sim-cluster-title">3D Wrist (1x Draw/Zoom · 2x Eraser)</span>
+              <span className="sim-cluster-title">Holds (1x Action · 2x Mode/Erase)</span>
               <div className="sim-btn-group">
                 <button
                   type="button"
                   tabIndex={-1}
-                  className={simHoldingDraw ? 'is-active-hold' : ''}
+                  className={simHolding1 ? 'is-active-hold' : ''}
                   onPointerDown={() => {
-                    setSimHoldingDraw(true);
-                    onStartHoldDrawSim();
+                    setSimHolding1(true);
+                    onStartHold1Sim();
                   }}
                   onPointerUp={() => {
-                    if (simHoldingDraw) {
-                      setSimHoldingDraw(false);
-                      onEndHoldDrawSim();
+                    if (simHolding1) {
+                      setSimHolding1(false);
+                      onEndHold1Sim();
                     }
                   }}
                   onPointerLeave={() => {
-                    if (simHoldingDraw) {
-                      setSimHoldingDraw(false);
-                      onEndHoldDrawSim();
+                    if (simHolding1) {
+                      setSimHolding1(false);
+                      onEndHold1Sim();
                     }
                   }}
                 >
-                  {simHoldingDraw ? '1x Holding… Move Sliders' : '1x Hold (Draw / Rotate Cursor)'}
+                  {simHolding1 ? '1x Holding…' : '1x Hold'}
                 </button>
                 <button
                   type="button"
                   tabIndex={-1}
-                  className={simHoldingErase ? 'is-active-erase-hold' : ''}
+                  className={simHolding2 ? 'is-active-erase-hold' : ''}
                   onPointerDown={() => {
-                    setSimHoldingErase(true);
-                    onStartHoldEraseSim();
+                    setSimHolding2(true);
+                    onStartHold2Sim();
                   }}
                   onPointerUp={() => {
-                    if (simHoldingErase) {
-                      setSimHoldingErase(false);
-                      onEndHoldEraseSim();
+                    if (simHolding2) {
+                      setSimHolding2(false);
+                      onEndHold2Sim();
                     }
                   }}
                   onPointerLeave={() => {
-                    if (simHoldingErase) {
-                      setSimHoldingErase(false);
-                      onEndHoldEraseSim();
+                    if (simHolding2) {
+                      setSimHolding2(false);
+                      onEndHold2Sim();
                     }
                   }}
                 >
-                  {simHoldingErase ? 'Erasing… Move Sliders' : '2x Hold Eraser'}
+                  {simHolding2 ? '2x Holding…' : '2x Hold (Mode/Erase)'}
                 </button>
                 <button type="button" tabIndex={-1} onClick={runWristCircleDemo}>
-                  Demo Wrist Loop
+                  Loop
                 </button>
               </div>
             </div>
@@ -255,7 +261,7 @@ export function WristTelemetryHud({
 
           <div className="sim-sliders">
             <label>
-              Arm Yaw ({yawDeg}°)
+              Yaw ({yawDeg}°)
               <input
                 type="range"
                 tabIndex={-1}
@@ -266,7 +272,7 @@ export function WristTelemetryHud({
               />
             </label>
             <label>
-              Arm Pitch ({pitchDeg}°)
+              Pitch ({pitchDeg}°)
               <input
                 type="range"
                 tabIndex={-1}
@@ -277,7 +283,7 @@ export function WristTelemetryHud({
               />
             </label>
             <label>
-              Wrist Roll ({rollDeg}°)
+              Roll ({rollDeg}°)
               <input
                 type="range"
                 tabIndex={-1}
@@ -293,4 +299,3 @@ export function WristTelemetryHud({
     </div>
   );
 }
-

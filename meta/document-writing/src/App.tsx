@@ -1,109 +1,214 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DocumentCanvas, LOGICAL_PAGE_WIDTH } from './components/DocumentCanvas';
+import { DocumentCanvas } from './components/DocumentCanvas';
 import {
-  type InputCapabilityReport,
-  NeuralComposer,
-} from './components/NeuralComposer';
+  DOC_MODES,
+  DRAW_TOP_ITEMS,
+  DocumentToolbars,
+  WRITE_LIST_OPTIONS,
+  WRITE_STYLE_OPTIONS,
+  WRITE_TOP_ITEMS,
+} from './components/DocumentToolbars';
+import { MenuScreen } from './components/MenuScreen';
+import type { InputCapabilityReport } from './components/NeuralComposer';
 import { WristTelemetryHud } from './components/WristTelemetryHud';
 import { useWristbandControls } from './hooks/useWristbandControls';
 import { WristSensorController } from './services/wristSensor';
-import type {
-  BlockKind,
-  DocBlock,
-  DocumentSnapshot,
-  GestureEventRecord,
-  InkStroke,
-  InteractionMode,
-  WristTelemetry,
+import {
+  A4_HEIGHT,
+  A4_WIDTH,
+  BRUSH_TYPES,
+  FONT_SIZES,
+  LINE_THICKNESSES,
+  SHAPE_TYPES,
+  TWENTY_COLORS,
+  type A4Document,
+  type AppScreen,
+  type AppSettings,
+  type BlockKind,
+  type BrushType,
+  type CursorPosition,
+  type DocBlock,
+  type DocInteractionMode,
+  type DocShape,
+  type DrawSubmenu,
+  type GestureEventRecord,
+  type InkStroke,
+  type ShapeType,
+  type ThemeMode,
+  type WristMappingMode,
+  type WristTelemetry,
+  type WriteSubmenu,
 } from './types/document';
 
-const STORAGE_KEY = 'neuraldoc-meta-glasses-v1';
+const DOCS_STORAGE_KEY = 'neuraldoc-meta-a4-v2';
+const SETTINGS_STORAGE_KEY = 'neuraldoc-meta-settings-v2';
 
-const PEN_COLORS = [
-  { name: 'Cyan', hex: '#45e6ff' },
-  { name: 'Amber', hex: '#ffd166' },
-  { name: 'Mint', hex: '#6bf178' },
-  { name: 'Coral', hex: '#ff758f' },
-  { name: 'White', hex: '#ffffff' },
-];
+const MIN_ZOOM = 1.0;
+const MAX_ZOOM = 3.5;
+const POINTER_SCALE = 360;
+const ZOOM_ROLL_SENSITIVITY = 0.032;
+const MODE_ROLL_STEP_DEG = 14;
+const CURSOR_SCRUB_STEP_DEG = 5;
+const ERASER_RADIUS = 16;
+const DOUBLE_HOLD_TRANSLATE_PX = 10;
+const DOUBLE_HOLD_ROLL_DEG = 6;
+const MAX_UNDO_HISTORY = 45;
 
-const PEN_WIDTHS = [2.5, 4.5, 7];
-const BLOCK_KINDS: BlockKind[] = ['p', 'h1', 'h2', 'bullet', 'quote'];
-
-function describeElement(el: EventTarget | null): string {
-  if (!el || !(el instanceof Element)) return 'window';
-  if (el === document.body) return 'body';
-  const tag = el.tagName.toLowerCase();
-  const id = el.id ? `#${el.id}` : '';
-  return `${tag}${id}`;
+interface DocumentHistorySnapshot {
+  blocks: DocBlock[];
+  strokes: InkStroke[];
+  shapes: DocShape[];
+  cursor: CursorPosition;
 }
 
-function describeActiveElement(): string {
-  return describeElement(document.activeElement);
-}
+const DEFAULT_SETTINGS: AppSettings = {
+  themeMode: 'transparent',
+  wristMappingMode: 'stretched-arm',
+};
+
+const INITIAL_TELEMETRY: WristTelemetry = {
+  status: 'checking',
+  rawWFirst: null,
+  w3cQuat: null,
+  pointing: null,
+  deltaPointing: null,
+  rollDeg: 0,
+  timestamp: 0,
+  isSimulating: false,
+};
 
 function makeId(prefix: string): string {
-  return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function createInitialDocument(): DocumentSnapshot {
+function cloneSnapshot(doc: A4Document): DocumentHistorySnapshot {
   return {
-    title: 'Project Brief — Meta Display',
-    blocks: [
-      { id: 'b1', kind: 'h1', text: 'NeuralDoc Workspace', bold: true },
-      {
-        id: 'b2',
-        kind: 'p',
-        text: 'Swipe Left/Right moves cursor inside this line.',
-      },
-      {
-        id: 'b3',
-        kind: 'bullet',
-        text: 'Swipe Up/Down scrolls across document lines.',
-      },
-      {
-        id: 'b4',
-        kind: 'bullet',
-        text: '1x Index Tip focuses Neural Write at the cursor.',
-      },
-      {
-        id: 'b5',
-        kind: 'bullet',
-        text: 'Hold Index Tip + move wrist draws in 3D space.',
-      },
-      {
-        id: 'b6',
-        kind: 'quote',
-        text: '2x Tip: New line | 3x Tip: Word Toolbar | Side: Del/Undo',
-        italic: true,
-      },
-    ],
-    strokes: [],
-    cursor: { lineIndex: 1, charIndex: 16 },
+    blocks: doc.blocks.map(b => ({ ...b })),
+    strokes: doc.strokes.map(s => ({
+      ...s,
+      points: s.points.map(p => ({ ...p })),
+    })),
+    shapes: doc.shapes.map(s => ({ ...s })),
+    cursor: { ...doc.cursor },
   };
 }
 
-function loadSavedDocument(): DocumentSnapshot {
+function sortDocsWithPinnedFirst(docs: A4Document[]): A4Document[] {
+  const pinned = docs.filter(d => d.pinned);
+  const unpinned = docs.filter(d => !d.pinned);
+  return [...pinned, ...unpinned];
+}
+
+function createSeedDocuments(): A4Document[] {
+  const now = Date.now();
+  return [
+    {
+      id: 'doc-1',
+      docNumber: 1,
+      title: 'Document 1',
+      pinned: false,
+      updatedAt: now,
+      cursor: { lineIndex: 0, charIndex: 0 },
+      blocks: [
+        {
+          id: 'blk-1',
+          kind: 'h1',
+          text: 'Document 1 — A4 Workspace',
+          bold: true,
+          fontSize: 22,
+        },
+        {
+          id: 'blk-2',
+          kind: 'p',
+          text: '2x Hold + Rotate switches View, Drawing, and Writing modes.',
+          fontSize: 15,
+        },
+        {
+          id: 'blk-3',
+          kind: 'bullet',
+          text: '1x Hold + Rotate zooms in View or scrubs cursor in Writing.',
+          fontSize: 15,
+        },
+        {
+          id: 'blk-4',
+          kind: 'bullet',
+          text: 'Middle Finger Back steps up toolbars or returns to Menu.',
+          fontSize: 15,
+        },
+      ],
+      strokes: [],
+      shapes: [],
+    },
+  ];
+}
+
+function createEmptyDocument(docNumber: number): A4Document {
+  return {
+    id: makeId('doc'),
+    docNumber,
+    title: `Document ${docNumber}`,
+    pinned: false,
+    updatedAt: Date.now(),
+    cursor: { lineIndex: 0, charIndex: 0 },
+    blocks: [
+      {
+        id: makeId('blk'),
+        kind: 'p',
+        text: '',
+        fontSize: 15,
+      },
+    ],
+    strokes: [],
+    shapes: [],
+  };
+}
+
+function loadSavedDocuments(): A4Document[] {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return createInitialDocument();
-    const parsed = JSON.parse(raw) as DocumentSnapshot;
-    if (!parsed || !Array.isArray(parsed.blocks) || parsed.blocks.length === 0) {
-      return createInitialDocument();
-    }
-    return parsed;
+    const raw = localStorage.getItem(DOCS_STORAGE_KEY);
+    if (!raw) return createSeedDocuments();
+    const parsed = JSON.parse(raw) as A4Document[];
+    if (!Array.isArray(parsed) || parsed.length === 0) return createSeedDocuments();
+    const valid = parsed.filter(
+      d =>
+        d &&
+        typeof d.id === 'string' &&
+        typeof d.docNumber === 'number' &&
+        Array.isArray(d.blocks) &&
+        Array.isArray(d.strokes) &&
+        Array.isArray(d.shapes),
+    );
+    return valid.length > 0 ? sortDocsWithPinnedFirst(valid) : createSeedDocuments();
   } catch {
-    return createInitialDocument();
+    return createSeedDocuments();
   }
 }
 
-function clamp(val: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, val));
+function loadSavedSettings(): AppSettings {
+  try {
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (!raw) return DEFAULT_SETTINGS;
+    const parsed = JSON.parse(raw) as Partial<AppSettings>;
+    return {
+      themeMode: parsed.themeMode === 'light' ? 'light' : 'transparent',
+      wristMappingMode:
+        parsed.wristMappingMode === 'horizontal-surface'
+          ? 'horizontal-surface'
+          : 'stretched-arm',
+    };
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
 }
 
-const ERASER_RADIUS = 16;
+function clampA4Point(x: number, y: number): { x: number; y: number } {
+  return {
+    x: Math.max(4, Math.min(A4_WIDTH - 4, x)),
+    y: Math.max(4, Math.min(A4_HEIGHT - 4, y)),
+  };
+}
 
-function distToSegmentSq(
+function distPointToSegment(
   px: number,
   py: number,
   ax: number,
@@ -111,16 +216,30 @@ function distToSegmentSq(
   bx: number,
   by: number,
 ): number {
-  const abx = bx - ax;
-  const aby = by - ay;
-  const lenSq = abx * abx + aby * aby;
-  if (lenSq <= 1e-6) {
-    return (px - ax) * (px - ax) + (py - ay) * (py - ay);
-  }
-  const t = clamp(((px - ax) * abx + (py - ay) * aby) / lenSq, 0, 1);
-  const projX = ax + t * abx;
-  const projY = ay + t * aby;
-  return (px - projX) * (px - projX) + (py - projY) * (py - projY);
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq <= 0.0001) return Math.hypot(px - ax, py - ay);
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+function segmentsDistance(
+  a1x: number,
+  a1y: number,
+  a2x: number,
+  a2y: number,
+  b1x: number,
+  b1y: number,
+  b2x: number,
+  b2y: number,
+): number {
+  return Math.min(
+    distPointToSegment(a1x, a1y, b1x, b1y, b2x, b2y),
+    distPointToSegment(a2x, a2y, b1x, b1y, b2x, b2y),
+    distPointToSegment(b1x, b1y, a1x, a1y, a2x, a2y),
+    distPointToSegment(b2x, b2y, a1x, a1y, a2x, a2y),
+  );
 }
 
 function strokeTouchesEraser(
@@ -131,1236 +250,1722 @@ function strokeTouchesEraser(
 ): boolean {
   const pts = stroke.points;
   if (pts.length === 0) return false;
-  const hitRadius = radius + stroke.baseWidth * 0.5;
-  const hitSq = hitRadius * hitRadius;
-  const mid = { x: (p0.x + p1.x) * 0.5, y: (p0.y + p1.y) * 0.5 };
-  const probes = [p0, mid, p1];
-
+  const hitRadius = radius + stroke.baseWidth * 0.6;
   if (pts.length === 1) {
-    const pt = pts[0];
-    return probes.some(
-      p => (p.x - pt.x) * (p.x - pt.x) + (p.y - pt.y) * (p.y - pt.y) <= hitSq,
-    );
+    return distPointToSegment(pts[0].x, pts[0].y, p0.x, p0.y, p1.x, p1.y) <= hitRadius;
   }
-
   for (let i = 0; i < pts.length - 1; i += 1) {
     const a = pts[i];
     const b = pts[i + 1];
-    for (const probe of probes) {
-      if (distToSegmentSq(probe.x, probe.y, a.x, a.y, b.x, b.y) <= hitSq) {
-        return true;
-      }
+    if (segmentsDistance(p0.x, p0.y, p1.x, p1.y, a.x, a.y, b.x, b.y) <= hitRadius) {
+      return true;
     }
   }
   return false;
 }
 
-function stepLazyBrushTarget(
-  origin: { x: number; y: number },
-  curPen: { x: number; y: number },
-  delta: { dx: number; dy: number },
-  maxHeight: number,
-): { x: number; y: number } | null {
-  const sensitivity = 350;
-  const targetX = clamp(origin.x + delta.dx * sensitivity, 8, LOGICAL_PAGE_WIDTH - 8);
-  const targetY = clamp(origin.y + delta.dy * sensitivity, 8, maxHeight - 8);
-  const pullDist = Math.hypot(targetX - curPen.x, targetY - curPen.y);
-  const STRING_RADIUS = 4.0;
-  if (pullDist <= STRING_RADIUS) return null;
-  const stepRatio = (pullDist - STRING_RADIUS) / pullDist;
+function shapeTouchesEraser(
+  shape: DocShape,
+  p0: { x: number; y: number },
+  p1: { x: number; y: number },
+  radius: number,
+): boolean {
+  const hitRadius = radius + shape.strokeWidth * 0.6;
+  const minX = Math.min(shape.x1, shape.x2);
+  const maxX = Math.max(shape.x1, shape.x2);
+  const minY = Math.min(shape.y1, shape.y2);
+  const maxY = Math.max(shape.y1, shape.y2);
+
+  if (shape.kind === 'arrow') {
+    return (
+      segmentsDistance(p0.x, p0.y, p1.x, p1.y, shape.x1, shape.y1, shape.x2, shape.y2) <=
+      hitRadius + 8
+    );
+  }
+
+  if (shape.kind === 'circle') {
+    const cx = (minX + maxX) * 0.5;
+    const cy = (minY + maxY) * 0.5;
+    const rx = Math.max(4, (maxX - minX) * 0.5);
+    const ry = Math.max(4, (maxY - minY) * 0.5);
+    const midX = (p0.x + p1.x) * 0.5;
+    const midY = (p0.y + p1.y) * 0.5;
+    const checks = [p0, p1, { x: midX, y: midY }];
+    return checks.some(pt => {
+      const norm = Math.hypot((pt.x - cx) / rx, (pt.y - cy) / ry);
+      const radialDist = Math.abs(norm - 1) * Math.min(rx, ry);
+      return radialDist <= hitRadius;
+    });
+  }
+
+  const edges: Array<[number, number, number, number]> =
+    shape.kind === 'rectangle'
+      ? [
+          [minX, minY, maxX, minY],
+          [maxX, minY, maxX, maxY],
+          [maxX, maxY, minX, maxY],
+          [minX, maxY, minX, minY],
+        ]
+      : [
+          [(minX + maxX) * 0.5, minY, maxX, maxY],
+          [maxX, maxY, minX, maxY],
+          [minX, maxY, (minX + maxX) * 0.5, minY],
+        ];
+
+  return edges.some(
+    ([ax, ay, bx, by]) =>
+      segmentsDistance(p0.x, p0.y, p1.x, p1.y, ax, ay, bx, by) <= hitRadius,
+  );
+}
+
+function getPanBoundsForZoom(zoom: number): { maxPanX: number; maxPanY: number } {
+  const sheetEl = document.getElementById('document-sheet');
+  const rect = sheetEl?.getBoundingClientRect();
+  const viewW = rect && rect.width > 10 ? rect.width : 540;
+  const viewH = rect && rect.height > 10 ? rect.height : 360;
+  const baseScale = Math.max(
+    0.18,
+    Math.min((viewW - 14) / A4_WIDTH, (viewH - 14) / A4_HEIGHT),
+  );
+  const effectiveScale = baseScale * zoom;
   return {
-    x: curPen.x + (targetX - curPen.x) * stepRatio,
-    y: curPen.y + (targetY - curPen.y) * stepRatio,
+    maxPanX: Math.max(0, (A4_WIDTH * effectiveScale - viewW + 16) * 0.5),
+    maxPanY: Math.max(0, (A4_HEIGHT * effectiveScale - viewH + 16) * 0.5),
   };
 }
 
-export default function App() {
-  const [doc, setDoc] = useState<DocumentSnapshot>(loadSavedDocument);
-  const [undoStack, setUndoStack] = useState<DocumentSnapshot[]>([]);
-  const [mode, setMode] = useState<InteractionMode>('DOCUMENT');
-  const [showProbe, setShowProbe] = useState(false);
-  const [rawEventLog, setRawEventLog] = useState<string[]>([]);
-  const [activeElTag, setActiveElTag] = useState<string>(() => describeActiveElement());
-  const [penColorIdx, setPenColorIdx] = useState(0);
-  const [penWidthIdx, setPenWidthIdx] = useState(1);
-  const [simulatorFrame, setSimulatorFrame] = useState(true);
-  const [showEmulatorPanel, setShowEmulatorPanel] = useState(false);
-  const [toolbarIndex, setToolbarIndex] = useState(0);
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
-  const [lastGesture, setLastGesture] = useState<GestureEventRecord | null>(null);
+function clampPanToZoom(panX: number, panY: number, zoom: number): { panX: number; panY: number } {
+  const { maxPanX, maxPanY } = getPanBoundsForZoom(zoom);
+  return {
+    panX: Math.max(-maxPanX, Math.min(maxPanX, panX)),
+    panY: Math.max(-maxPanY, Math.min(maxPanY, panY)),
+  };
+}
 
-  const [telemetry, setTelemetry] = useState<WristTelemetry>({
-    status: 'checking',
-    rawWFirst: null,
-    w3cQuat: null,
-    pointing: null,
-    deltaPointing: null,
-    rollDeg: 0,
-    timestamp: 0,
-    isSimulating: false,
-  });
+function createStrokeObject(
+  point: { x: number; y: number },
+  color: string,
+  fillColor: string,
+  baseWidth: number,
+  brushType: BrushType,
+): InkStroke {
+  return {
+    id: makeId('stk'),
+    color,
+    fillColor,
+    baseWidth,
+    brushType,
+    points: [{ x: point.x, y: point.y, width: baseWidth }],
+  };
+}
 
+function appendStrokePoint(
+  prev: InkStroke,
+  rawPoint: { x: number; y: number },
+): InkStroke {
+  const last = prev.points[prev.points.length - 1];
+  const minDist = prev.brushType === 'spray' ? 1.5 : 2.2;
+  if (last && Math.hypot(rawPoint.x - last.x, rawPoint.y - last.y) < minDist) {
+    return prev;
+  }
+  return {
+    ...prev,
+    points: [...prev.points, { x: rawPoint.x, y: rawPoint.y, width: prev.baseWidth }],
+  };
+}
+
+function readInputCapabilityBaseline(emgWristStatus: string): InputCapabilityReport {
+  const win = window as unknown as {
+    SpeechRecognition?: unknown;
+    webkitSpeechRecognition?: unknown;
+  };
+  const activeTag = document.activeElement
+    ? document.activeElement.tagName.toLowerCase()
+    : 'none';
+  return {
+    emgWristStatus,
+    activeElementTag: activeTag,
+    hasInputEvents: typeof InputEvent !== 'undefined',
+    hasCompositionEvents: typeof CompositionEvent !== 'undefined',
+    hasVirtualKeyboard: 'virtualKeyboard' in navigator,
+    hasSpeechRecognition: Boolean(win.SpeechRecognition || win.webkitSpeechRecognition),
+    lastRawEvents: [],
+  };
+}
+
+export function App() {
+  const [docs, setDocs] = useState<A4Document[]>(loadSavedDocuments);
+  const [settings, setSettings] = useState<AppSettings>(loadSavedSettings);
+  const [screen, setScreen] = useState<AppScreen>('MENU');
+  const [activeDocId, setActiveDocId] = useState<string | null>(null);
+
+  // Explorer Menu & Settings state
+  const [menuFocusArea, setMenuFocusArea] = useState<'CARDS' | 'GEAR'>('CARDS');
+  const [menuSelectedIndex, setMenuSelectedIndex] = useState(0);
+  const [cardOptionsDocId, setCardOptionsDocId] = useState<string | null>(null);
+  const [cardOptionIndex, setCardOptionIndex] = useState<0 | 1>(0);
+  const [deleteConfirmDocId, setDeleteConfirmDocId] = useState<string | null>(null);
+  const [deleteConfirmYes, setDeleteConfirmYes] = useState(false);
+  const [settingsRowIndex, setSettingsRowIndex] = useState<0 | 1>(0);
+
+  // Document View mode & viewport state
+  const [docMode, setDocMode] = useState<DocInteractionMode>('VIEW');
+  const [modeSelectorActive, setModeSelectorActive] = useState(false);
+  const [hoveredModeIndex, setHoveredModeIndex] = useState(0);
+  const [zoom, setZoom] = useState(1.0);
+  const [panX, setPanX] = useState(0);
+  const [panY, setPanY] = useState(0);
+
+  // Drawing Mode state & 2-level tree toolbar
+  const [drawSubmenu, setDrawSubmenu] = useState<DrawSubmenu>(null);
+  const [drawTopIndex, setDrawTopIndex] = useState(0);
+  const [drawSubIndex, setDrawSubIndex] = useState(0);
+  const [drawTool, setDrawTool] = useState<'brush' | 'shape'>('brush');
+  const [selectedThickness, setSelectedThickness] = useState<number>(LINE_THICKNESSES[1]);
+  const [selectedColor, setSelectedColor] = useState<string>(TWENTY_COLORS[4].hex);
+  const [selectedFillColor, setSelectedFillColor] = useState<string>(TWENTY_COLORS[15].hex);
+  const [selectedBrush, setSelectedBrush] = useState<BrushType>('pen');
+  const [selectedShape, setSelectedShape] = useState<ShapeType>('circle');
   const [penPos, setPenPos] = useState<{ x: number; y: number }>({
-    x: LOGICAL_PAGE_WIDTH * 0.5,
-    y: 160,
+    x: A4_WIDTH * 0.5,
+    y: A4_HEIGHT * 0.35,
   });
   const [activeStroke, setActiveStroke] = useState<InkStroke | null>(null);
+  const [activeShape, setActiveShape] = useState<DocShape | null>(null);
+  const [isErasing, setIsErasing] = useState(false);
 
-  const docRef = useRef(doc);
-  docRef.current = doc;
-  const undoStackRef = useRef<DocumentSnapshot[]>([]);
-  undoStackRef.current = undoStack;
-  const modeRef = useRef(mode);
-  modeRef.current = mode;
-  const telemetryStatusRef = useRef(telemetry.status);
-  telemetryStatusRef.current = telemetry.status;
+  // Writing Mode state & 2-level tree toolbar
+  const [writeSubmenu, setWriteSubmenu] = useState<WriteSubmenu>(null);
+  const [writeTopIndex, setWriteTopIndex] = useState(0);
+  const [writeSubIndex, setWriteSubIndex] = useState(0);
+  const [isCursorScrubbing, setIsCursorScrubbing] = useState(false);
+  const [showProbe, setShowProbe] = useState(false);
+  const [rawInputEvents, setRawInputEvents] = useState<string[]>([]);
+
+  // Telemetry & Band Sim HUD state
+  const [telemetry, setTelemetry] = useState<WristTelemetry>(INITIAL_TELEMETRY);
+  const [lastGesture, setLastGesture] = useState<GestureEventRecord | null>(null);
+  const [simulatorFrame, setSimulatorFrame] = useState(false);
+  const [showEmulatorPanel, setShowEmulatorPanel] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  // Refs for sensor loops & gesture disambiguation
+  const writerInputRef = useRef<HTMLInputElement | null>(null);
+  const sensorRef = useRef<WristSensorController | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const undoMapRef = useRef<Map<string, DocumentHistorySnapshot[]>>(new Map());
+
+  const activeHoldRef = useRef<
+    | 'none'
+    | 'view-zoom-pan'
+    | 'draw-paint'
+    | 'draw-erase'
+    | 'double-pending'
+    | 'mode-select'
+    | 'write-scrub'
+  >('none');
+
+  const zoomOriginRef = useRef(1.0);
+  const panOriginRef = useRef({ panX: 0, panY: 0 });
+  const pointerDragKindRef = useRef<'none' | 'pan' | 'draw'>('none');
+  const pointerPanStartRef = useRef({ clientX: 0, clientY: 0, panX: 0, panY: 0 });
+
   const penPosRef = useRef(penPos);
   penPosRef.current = penPos;
+  const hoverOriginRef = useRef({ x: A4_WIDTH * 0.5, y: A4_HEIGHT * 0.35 });
+  const drawOriginRef = useRef({ x: A4_WIDTH * 0.5, y: A4_HEIGHT * 0.35 });
   const activeStrokeRef = useRef<InkStroke | null>(null);
-  const drawOriginRef = useRef<{ x: number; y: number }>({ x: 270, y: 160 });
-  const lastDrawTickRef = useRef(0);
-  const lastHudTickRef = useRef(0);
-  const eraseSessionSnapshotRef = useRef<DocumentSnapshot | null>(null);
-  const erasedCountRef = useRef(0);
-  const holdIntentRef = useRef<'pending' | 'draw' | 'scrub'>('pending');
-  const scrubStartColRef = useRef(0);
-  const lastGlideTickRef = useRef(0);
+  const activeShapeRef = useRef<DocShape | null>(null);
+  const erasePrevPosRef = useRef({ x: A4_WIDTH * 0.5, y: A4_HEIGHT * 0.35 });
+  const eraseUndoPushedRef = useRef(false);
 
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const composerInputRef = useRef<HTMLInputElement | null>(null);
-  const toolbarBtnRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const toastTimerRef = useRef<number | null>(null);
-  const sensorRef = useRef<WristSensorController | null>(null);
+  const preSelectorModeRef = useRef<DocInteractionMode>('VIEW');
+  const hoveredModeIdxRef = useRef(0);
+  const writeScrubOriginCharRef = useRef(0);
+  const drawHoldStartedAtRef = useRef(0);
 
-  const currentColor = PEN_COLORS[penColorIdx].hex;
-  const maxSheetHeight = Math.max(480, doc.blocks.length * 44 + 180);
+  // Keep latest reactive slices for high-frequency sensor callback & popstate
+  const docsRef = useRef(docs);
+  docsRef.current = docs;
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
+  const activeDocIdRef = useRef(activeDocId);
+  activeDocIdRef.current = activeDocId;
+  const docModeRef = useRef(docMode);
+  docModeRef.current = docMode;
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const panRef = useRef({ panX, panY });
+  panRef.current = { panX, panY };
+  const drawToolRef = useRef(drawTool);
+  drawToolRef.current = drawTool;
+  const selectedColorRef = useRef(selectedColor);
+  selectedColorRef.current = selectedColor;
+  const selectedFillColorRef = useRef(selectedFillColor);
+  selectedFillColorRef.current = selectedFillColor;
+  const selectedThicknessRef = useRef(selectedThickness);
+  selectedThicknessRef.current = selectedThickness;
+  const selectedBrushRef = useRef(selectedBrush);
+  selectedBrushRef.current = selectedBrush;
+  const selectedShapeRef = useRef(selectedShape);
+  selectedShapeRef.current = selectedShape;
+
+  const activeDoc = useMemo(
+    () => docs.find(d => d.id === activeDocId) ?? null,
+    [activeDocId, docs],
+  );
+  const activeDocRef = useRef<A4Document | null>(activeDoc);
+  activeDocRef.current = activeDoc;
 
   const showToast = useCallback((msg: string) => {
-    setToastMsg(msg);
-    if (toastTimerRef.current !== null) {
-      window.clearTimeout(toastTimerRef.current);
-    }
-    toastTimerRef.current = window.setTimeout(() => {
-      setToastMsg(null);
-    }, 2000);
+    setToast(msg);
+    if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 1600);
   }, []);
 
   const logGesture = useCallback((label: string, detail: string) => {
-    setLastGesture({
-      id: makeId('g'),
-      label,
-      detail,
-      time: new Date().toLocaleTimeString(),
+    const time = new Date().toLocaleTimeString([], {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
     });
+    setLastGesture({ id: makeId('g'), label, detail, time });
   }, []);
 
-  // Save document safely to localStorage
+  // Persist docs & settings
   useEffect(() => {
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(doc));
+      localStorage.setItem(DOCS_STORAGE_KEY, JSON.stringify(docs));
     } catch {
-      // Storage may be disabled or full on wearable runtime
+      // Ignore quota exceeded errors
     }
-  }, [doc]);
+  }, [docs]);
 
-  const commitDocUpdate = useCallback(
-    (updater: (prev: DocumentSnapshot) => DocumentSnapshot, recordUndo = true) => {
-      const prev = docRef.current;
-      const next = updater(prev);
-      if (next === prev) return;
-      if (recordUndo) {
-        const nextStack = [...undoStackRef.current.slice(-39), prev];
-        undoStackRef.current = nextStack;
-        setUndoStack(nextStack);
-      }
-      docRef.current = next;
-      setDoc(next);
-    },
-    [],
-  );
-
-  const eraseStrokesAt = useCallback(
-    (p0: { x: number; y: number }, p1: { x: number; y: number }) => {
-      const prev = docRef.current;
-      if (prev.strokes.length === 0) return;
-
-      const remaining: InkStroke[] = [];
-      let removedHere = 0;
-      for (const stroke of prev.strokes) {
-        if (strokeTouchesEraser(stroke, p0, p1, ERASER_RADIUS)) {
-          removedHere += 1;
-        } else {
-          remaining.push(stroke);
-        }
-      }
-      if (removedHere === 0) return;
-
-      if (!eraseSessionSnapshotRef.current) {
-        eraseSessionSnapshotRef.current = prev;
-        const nextStack = [...undoStackRef.current.slice(-39), prev];
-        undoStackRef.current = nextStack;
-        setUndoStack(nextStack);
-      }
-
-      erasedCountRef.current += removedHere;
-      const nextDoc: DocumentSnapshot = {
-        ...prev,
-        strokes: remaining,
-      };
-      docRef.current = nextDoc;
-      setDoc(nextDoc);
-    },
-    [],
-  );
-
-  // Initialize Meta Neural Band `emg-wrist` RelativeOrientationSensor
   useEffect(() => {
-    const controller = new WristSensorController({
-      onStatusChange: nextStatus => {
-        telemetryStatusRef.current = nextStatus;
-      },
-      onReading: nextTelemetry => {
-        const now = performance.now();
-        telemetryStatusRef.current = nextTelemetry.status;
-        const activeMode = modeRef.current;
+    try {
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    } catch {
+      // Ignore quota exceeded errors
+    }
+  }, [settings]);
 
-        // 1) 1x Hold: disambiguate arm translation (DRAW_HOLD) vs forearm rotation (CURSOR_SCRUB)
-        if (
-          (activeMode === 'DRAW_HOLD' || activeMode === 'CURSOR_SCRUB') &&
-          now - lastDrawTickRef.current >= 33
-        ) {
-          lastDrawTickRef.current = now;
-          const rollDeg = nextTelemetry.rollDeg;
-          const absRoll = Math.abs(rollDeg);
-          const pointingPx = nextTelemetry.deltaPointing
-            ? Math.hypot(
-              nextTelemetry.deltaPointing.dx * 350,
-              nextTelemetry.deltaPointing.dy * 350,
-            )
-            : 0;
+  useEffect(() => {
+    sensorRef.current?.setMappingMode(settings.wristMappingMode);
+  }, [settings.wristMappingMode]);
 
-          if (holdIntentRef.current === 'pending') {
-            if (absRoll >= 4.5 && pointingPx < Math.max(15, absRoll * 2.2)) {
-              holdIntentRef.current = 'scrub';
-              activeStrokeRef.current = null;
-              setActiveStroke(null);
-              modeRef.current = 'CURSOR_SCRUB';
-              setMode('CURSOR_SCRUB');
-            } else if (pointingPx >= 11) {
-              holdIntentRef.current = 'draw';
-            }
-          }
-
-          if (holdIntentRef.current === 'scrub' || modeRef.current === 'CURSOR_SCRUB') {
-            const effectiveDeg =
-              absRoll <= 2.5 ? 0 : rollDeg > 0 ? rollDeg - 2.5 : rollDeg + 2.5;
-            const charOffset = Math.round(effectiveDeg / 3.5);
-            const curDoc = docRef.current;
-            const activeLineText = curDoc.blocks[curDoc.cursor.lineIndex]?.text ?? '';
-            const maxCol = activeLineText.length;
-
-            if (absRoll > 24 && now - lastGlideTickRef.current >= 95) {
-              lastGlideTickRef.current = now;
-              scrubStartColRef.current = clamp(
-                scrubStartColRef.current + Math.sign(rollDeg),
-                0,
-                maxCol,
-              );
-            }
-
-            const targetCol = clamp(scrubStartColRef.current + charOffset, 0, maxCol);
-            if (targetCol !== curDoc.cursor.charIndex) {
-              const nextDoc: DocumentSnapshot = {
-                ...curDoc,
-                cursor: { ...curDoc.cursor, charIndex: targetCol },
-              };
-              docRef.current = nextDoc;
-              setDoc(nextDoc);
-            }
-          } else if (
-            holdIntentRef.current === 'draw' &&
-            activeStrokeRef.current &&
-            nextTelemetry.deltaPointing
-          ) {
-            const nextPos = stepLazyBrushTarget(
-              drawOriginRef.current,
-              penPosRef.current,
-              nextTelemetry.deltaPointing,
-              maxSheetHeight,
-            );
-            if (nextPos) {
-              const strokeWidth = PEN_WIDTHS[penWidthIdx];
-              penPosRef.current = nextPos;
-              setPenPos(nextPos);
-
-              const pts = activeStrokeRef.current.points;
-              const prevPt = pts[pts.length - 1];
-              if (!prevPt || Math.hypot(nextPos.x - prevPt.x, nextPos.y - prevPt.y) >= 3.0) {
-                const updated: InkStroke = {
-                  ...activeStrokeRef.current,
-                  points: [...pts, { x: nextPos.x, y: nextPos.y, width: strokeWidth }],
-                };
-                activeStrokeRef.current = updated;
-                setActiveStroke(updated);
-              }
-            }
-          }
-        }
-
-        // 2) 2x Tip Tap & Hold: Eraser via 3D wrist coordinates
-        if (
-          activeMode === 'ERASE_HOLD' &&
-          nextTelemetry.deltaPointing &&
-          now - lastDrawTickRef.current >= 33
-        ) {
-          lastDrawTickRef.current = now;
-          const curPen = penPosRef.current;
-          const nextPos = stepLazyBrushTarget(
-            drawOriginRef.current,
-            curPen,
-            nextTelemetry.deltaPointing,
-            maxSheetHeight,
-          );
-          if (nextPos) {
-            penPosRef.current = nextPos;
-            setPenPos(nextPos);
-            eraseStrokesAt(curPen, nextPos);
-          }
-        }
-
-        // Throttle HUD state updates to ~15 Hz to keep rendering light
-        if (now - lastHudTickRef.current >= 66) {
-          lastHudTickRef.current = now;
-          setTelemetry(nextTelemetry);
-        }
-      },
-    });
-
-    sensorRef.current = controller;
-    controller.start();
-
-    const onVisChange = () => {
-      if (document.hidden) {
-        controller.stop();
-      } else {
-        controller.start();
+  const pushHistorySubstate = useCallback(() => {
+    try {
+      if (window.history.state?.neuralScreen !== 'sub') {
+        window.history.pushState({ neuralScreen: 'sub' }, '');
       }
-    };
-    document.addEventListener('visibilitychange', onVisChange);
-
-    return () => {
-      document.removeEventListener('visibilitychange', onVisChange);
-      controller.stop();
-      sensorRef.current = null;
-      if (toastTimerRef.current !== null) {
-        window.clearTimeout(toastTimerRef.current);
-      }
-    };
-  }, [eraseStrokesAt, maxSheetHeight, penWidthIdx]);
-
-  const recordRawInputEvent = useCallback((eventName: string, detail: string) => {
-    const stamp = new Date().toLocaleTimeString();
-    const entry = `[${stamp}] ${eventName}: ${detail}`;
-    setRawEventLog(prev => [entry, ...prev.slice(0, 7)]);
+    } catch {
+      // Ignore restricted history state
+    }
   }, []);
 
-  useEffect(() => {
-    const updateActive = (e?: FocusEvent) => {
-      setActiveElTag(describeActiveElement());
-      if (e?.type === 'focusin') {
-        recordRawInputEvent('focusin', describeElement(e.target));
-      }
-    };
-    const onWinKeyDown = (e: KeyboardEvent) => {
-      if (e.repeat) return;
-      recordRawInputEvent('keydown', `key="${e.key}" target=${describeElement(e.target)}`);
-    };
-    const onPlainFieldEvent = (e: Event) => {
-      if (e.target instanceof HTMLInputElement && e.target.id === 'plain-glasses-test-input') {
-        recordRawInputEvent(`plain:${e.type}`, `val="${e.target.value}"`);
-      }
-    };
-    window.addEventListener('focusin', updateActive);
-    window.addEventListener('focusout', updateActive);
-    window.addEventListener('keydown', onWinKeyDown, true);
-    window.addEventListener('input', onPlainFieldEvent, true);
-    window.addEventListener('change', onPlainFieldEvent, true);
-    return () => {
-      window.removeEventListener('focusin', updateActive);
-      window.removeEventListener('focusout', updateActive);
-      window.removeEventListener('keydown', onWinKeyDown, true);
-      window.removeEventListener('input', onPlainFieldEvent, true);
-      window.removeEventListener('change', onPlainFieldEvent, true);
-    };
-  }, [recordRawInputEvent]);
+  const pushUndoSnapshot = useCallback((doc: A4Document) => {
+    const list = undoMapRef.current.get(doc.id) ?? [];
+    const next = [...list.slice(-(MAX_UNDO_HISTORY - 1)), cloneSnapshot(doc)];
+    undoMapRef.current.set(doc.id, next);
+  }, []);
 
-  const insertTextAtCursor = useCallback(
-    (rawText: string) => {
-      const sanitized = rawText.replace(/\r?\n/g, ' ');
-      if (sanitized.length === 0) return;
-      commitDocUpdate(prev => {
-        const { lineIndex, charIndex } = prev.cursor;
-        const target = prev.blocks[lineIndex];
-        if (!target) return prev;
-        const clampedCol = clamp(charIndex, 0, target.text.length);
-        const nextText =
-          target.text.slice(0, clampedCol) + sanitized + target.text.slice(clampedCol);
-        const blocks = [...prev.blocks];
-        blocks[lineIndex] = { ...target, text: nextText };
-        return {
-          ...prev,
-          blocks,
-          cursor: {
-            lineIndex,
-            charIndex: clampedCol + sanitized.length,
-          },
-        };
-      });
+  const updateActiveDocument = useCallback(
+    (updater: (doc: A4Document) => A4Document, recordUndo = false) => {
+      const id = activeDocIdRef.current;
+      if (!id) return;
+      setDocs(prev =>
+        prev.map(doc => {
+          if (doc.id !== id) return doc;
+          if (recordUndo) pushUndoSnapshot(doc);
+          return updater(doc);
+        }),
+      );
     },
-    [commitDocUpdate],
+    [pushUndoSnapshot],
   );
 
-  const commitPendingDraftIfAny = useCallback(() => {
-    const el = composerInputRef.current;
-    const raw = el?.value ?? '';
-    if (el) {
-      el.value = '';
-    }
-    if (raw.length > 0) {
-      insertTextAtCursor(raw);
-      showToast(`Inserted "${raw.slice(0, 20)}${raw.length > 20 ? '…' : ''}"`);
-    }
-  }, [insertTextAtCursor, showToast]);
-
-  // Document editing operations
-  const handleSwipeUp = useCallback(() => {
-    commitPendingDraftIfAny();
-    setDoc(prev => {
-      const nextLine = Math.max(0, prev.cursor.lineIndex - 1);
-      if (nextLine === prev.cursor.lineIndex && scrollRef.current) {
-        scrollRef.current.scrollBy({ top: -48, behavior: 'smooth' });
-        return prev;
-      }
-      const lineLen = prev.blocks[nextLine]?.text.length ?? 0;
-      return {
-        ...prev,
-        cursor: {
-          lineIndex: nextLine,
-          charIndex: Math.min(prev.cursor.charIndex, lineLen),
-        },
-      };
-    });
-  }, [commitPendingDraftIfAny]);
-
-  const handleSwipeDown = useCallback(() => {
-    commitPendingDraftIfAny();
-    setDoc(prev => {
-      const nextLine = Math.min(prev.blocks.length - 1, prev.cursor.lineIndex + 1);
-      if (nextLine === prev.cursor.lineIndex && scrollRef.current) {
-        scrollRef.current.scrollBy({ top: 48, behavior: 'smooth' });
-        return prev;
-      }
-      const lineLen = prev.blocks[nextLine]?.text.length ?? 0;
-      return {
-        ...prev,
-        cursor: {
-          lineIndex: nextLine,
-          charIndex: Math.min(prev.cursor.charIndex, lineLen),
-        },
-      };
-    });
-  }, [commitPendingDraftIfAny]);
-
-  const handleSwipeLeft = useCallback(() => {
-    commitPendingDraftIfAny();
-    setDoc(prev => {
-      const nextChar = Math.max(0, prev.cursor.charIndex - 1);
-      if (nextChar === prev.cursor.charIndex) return prev;
-      return {
-        ...prev,
-        cursor: { ...prev.cursor, charIndex: nextChar },
-      };
-    });
-  }, [commitPendingDraftIfAny]);
-
-  const handleSwipeRight = useCallback(() => {
-    commitPendingDraftIfAny();
-    setDoc(prev => {
-      const lineText = prev.blocks[prev.cursor.lineIndex]?.text ?? '';
-      const nextChar = Math.min(lineText.length, prev.cursor.charIndex + 1);
-      if (nextChar === prev.cursor.charIndex) return prev;
-      return {
-        ...prev,
-        cursor: { ...prev.cursor, charIndex: nextChar },
-      };
-    });
-  }, [commitPendingDraftIfAny]);
-
-  const insertNewLineAtCursor = useCallback(() => {
-    commitPendingDraftIfAny();
-    commitDocUpdate(prev => {
-      const { lineIndex, charIndex } = prev.cursor;
-      const target = prev.blocks[lineIndex];
-      if (!target) return prev;
-
-      const before = target.text.slice(0, charIndex);
-      const after = target.text.slice(charIndex);
-      const nextKind: BlockKind = target.kind === 'bullet' ? 'bullet' : 'p';
-
-      const updated: DocBlock = { ...target, text: before };
-      const created: DocBlock = { id: makeId('b'), kind: nextKind, text: after };
-
-      const blocks = [
-        ...prev.blocks.slice(0, lineIndex),
-        updated,
-        created,
-        ...prev.blocks.slice(lineIndex + 1),
-      ];
-
-      return {
-        ...prev,
-        blocks,
-        cursor: { lineIndex: lineIndex + 1, charIndex: 0 },
-      };
-    });
-    showToast('New line inserted');
-  }, [commitDocUpdate, commitPendingDraftIfAny, showToast]);
-
-  const backspaceAtCursor = useCallback(() => {
-    commitPendingDraftIfAny();
-    commitDocUpdate(prev => {
-      const { lineIndex, charIndex } = prev.cursor;
-      const target = prev.blocks[lineIndex];
-      if (!target) return prev;
-
-      if (charIndex > 0) {
-        const nextText = target.text.slice(0, charIndex - 1) + target.text.slice(charIndex);
-        const blocks = [...prev.blocks];
-        blocks[lineIndex] = { ...target, text: nextText };
-        return {
-          ...prev,
-          blocks,
-          cursor: { lineIndex, charIndex: charIndex - 1 },
-        };
-      }
-
-      if (lineIndex > 0) {
-        const prevBlock = prev.blocks[lineIndex - 1];
-        const joinCol = prevBlock.text.length;
-        const merged: DocBlock = {
-          ...prevBlock,
-          text: prevBlock.text + target.text,
-        };
-        const blocks = [
-          ...prev.blocks.slice(0, lineIndex - 1),
-          merged,
-          ...prev.blocks.slice(lineIndex + 1),
-        ];
-        return {
-          ...prev,
-          blocks,
-          cursor: { lineIndex: lineIndex - 1, charIndex: joinCol },
-        };
-      }
-
-      return prev;
-    });
-  }, [commitDocUpdate, commitPendingDraftIfAny]);
-
   const handleUndo = useCallback(() => {
-    commitPendingDraftIfAny();
-    const stack = undoStackRef.current;
-    if (stack.length === 0) {
+    const id = activeDocIdRef.current;
+    if (!id) return;
+    const stack = undoMapRef.current.get(id);
+    if (!stack || stack.length === 0) {
       showToast('Nothing to undo');
       return;
     }
-    const last = stack[stack.length - 1];
-    const nextStack = stack.slice(0, -1);
-    undoStackRef.current = nextStack;
-    setUndoStack(nextStack);
-    docRef.current = last;
-    setDoc(last);
-    showToast('Reverted last stroke / edit');
-  }, [commitPendingDraftIfAny, showToast]);
+    const snap = stack[stack.length - 1];
+    undoMapRef.current.set(id, stack.slice(0, -1));
+    setDocs(prev =>
+      prev.map(doc =>
+        doc.id === id
+          ? {
+              ...doc,
+              updatedAt: Date.now(),
+              blocks: snap.blocks,
+              strokes: snap.strokes,
+              shapes: snap.shapes,
+              cursor: snap.cursor,
+            }
+          : doc,
+      ),
+    );
+    showToast('Undo');
+  }, [showToast]);
 
-  // 3D Wrist & Pointer Drawing / Cursor-Zoom / Eraser Hold Handlers
-  const startWristDrawHold = useCallback(
-    (pointerStart?: { x: number; y: number }) => {
-      commitPendingDraftIfAny();
-      if (modeRef.current === 'COMPOSER') {
-        composerInputRef.current?.blur();
-      }
-      sensorRef.current?.captureReference();
-
-      const usePointerOrigin = Boolean(pointerStart && telemetryStatusRef.current !== 'live');
-      const origin =
-        usePointerOrigin && pointerStart
-          ? pointerStart
-          : {
-            x: penPosRef.current.x,
-            y: clamp(88 + docRef.current.cursor.lineIndex * 36, 40, maxSheetHeight - 40),
+  const applyEraserSegment = useCallback(
+    (p0: { x: number; y: number }, p1: { x: number; y: number }) => {
+      const id = activeDocIdRef.current;
+      if (!id) return;
+      setDocs(prev =>
+        prev.map(doc => {
+          if (doc.id !== id) return doc;
+          const remainingStrokes = doc.strokes.filter(
+            s => !strokeTouchesEraser(s, p0, p1, ERASER_RADIUS),
+          );
+          const remainingShapes = doc.shapes.filter(
+            sh => !shapeTouchesEraser(sh, p0, p1, ERASER_RADIUS),
+          );
+          if (
+            remainingStrokes.length === doc.strokes.length &&
+            remainingShapes.length === doc.shapes.length
+          ) {
+            return doc;
+          }
+          if (!eraseUndoPushedRef.current) {
+            pushUndoSnapshot(doc);
+            eraseUndoPushedRef.current = true;
+          }
+          return {
+            ...doc,
+            updatedAt: Date.now(),
+            strokes: remainingStrokes,
+            shapes: remainingShapes,
           };
-
-      holdIntentRef.current = usePointerOrigin ? 'draw' : 'pending';
-      scrubStartColRef.current = docRef.current.cursor.charIndex;
-      lastGlideTickRef.current = 0;
-
-      drawOriginRef.current = origin;
-      penPosRef.current = origin;
-      setPenPos(origin);
-
-      const newStroke: InkStroke = {
-        id: makeId('s'),
-        color: PEN_COLORS[penColorIdx].hex,
-        baseWidth: PEN_WIDTHS[penWidthIdx],
-        points: [{ x: origin.x, y: origin.y, width: PEN_WIDTHS[penWidthIdx] }],
-      };
-      activeStrokeRef.current = newStroke;
-      setActiveStroke(newStroke);
-      setMode('DRAW_HOLD');
-      modeRef.current = 'DRAW_HOLD';
+        }),
+      );
     },
-    [commitPendingDraftIfAny, maxSheetHeight, penColorIdx, penWidthIdx],
+    [pushUndoSnapshot],
   );
 
-  const handleHoldMove = useCallback(
-    (x: number, y: number) => {
-      // When physical emg-wrist sensor is live, never let WebView pointermove fight 3D wrist coords
-      if (telemetryStatusRef.current === 'live') return;
-      if (!activeStrokeRef.current) return;
-      const now = performance.now();
-      if (now - lastDrawTickRef.current < 16) return;
-      lastDrawTickRef.current = now;
-
-      const pts = activeStrokeRef.current.points;
-      const prevPt = pts[pts.length - 1];
-      if (!prevPt || Math.hypot(x - prevPt.x, y - prevPt.y) >= 2.5) {
-        penPosRef.current = { x, y };
-        setPenPos({ x, y });
-        const updated: InkStroke = {
-          ...activeStrokeRef.current,
-          points: [...pts, { x, y, width: PEN_WIDTHS[penWidthIdx] }],
-        };
-        activeStrokeRef.current = updated;
-        setActiveStroke(updated);
-      }
-    },
-    [penWidthIdx],
-  );
-
-  const finishWristDrawHold = useCallback(() => {
-    const intent = holdIntentRef.current;
-    holdIntentRef.current = 'pending';
-    const stroke = activeStrokeRef.current;
+  const commitActiveInkOrShape = useCallback(() => {
+    const stk = activeStrokeRef.current;
+    const shp = activeShapeRef.current;
     activeStrokeRef.current = null;
+    activeShapeRef.current = null;
     setActiveStroke(null);
-    sensorRef.current?.clearReference();
-    setMode('DOCUMENT');
-    modeRef.current = 'DOCUMENT';
+    setActiveShape(null);
 
-    if (intent === 'scrub') {
-      showToast(`Cursor at Col ${docRef.current.cursor.charIndex + 1}`);
+    if (stk && stk.points.length >= 1) {
+      updateActiveDocument(
+        doc => ({
+          ...doc,
+          updatedAt: Date.now(),
+          strokes: [...doc.strokes, stk],
+        }),
+        true,
+      );
+    } else if (
+      shp &&
+      (Math.abs(shp.x2 - shp.x1) >= 4 || Math.abs(shp.y2 - shp.y1) >= 4)
+    ) {
+      updateActiveDocument(
+        doc => ({
+          ...doc,
+          updatedAt: Date.now(),
+          shapes: [...doc.shapes, shp],
+        }),
+        true,
+      );
+    }
+  }, [updateActiveDocument]);
+
+  const beginDrawOrShapeAt = useCallback((pt: { x: number; y: number }) => {
+    const clamped = clampA4Point(pt.x, pt.y);
+    if (drawToolRef.current === 'shape') {
+      const shp: DocShape = {
+        id: makeId('shp'),
+        kind: selectedShapeRef.current,
+        x1: clamped.x,
+        y1: clamped.y,
+        x2: clamped.x,
+        y2: clamped.y,
+        color: selectedColorRef.current,
+        strokeWidth: selectedThicknessRef.current,
+      };
+      activeShapeRef.current = shp;
+      setActiveShape(shp);
+    } else {
+      const stk = createStrokeObject(
+        clamped,
+        selectedColorRef.current,
+        selectedFillColorRef.current,
+        selectedThicknessRef.current,
+        selectedBrushRef.current,
+      );
+      activeStrokeRef.current = stk;
+      setActiveStroke(stk);
+    }
+  }, []);
+
+  const updateDrawOrShapeAt = useCallback((pt: { x: number; y: number }) => {
+    const clamped = clampA4Point(pt.x, pt.y);
+    if (activeShapeRef.current) {
+      const nextShape: DocShape = {
+        ...activeShapeRef.current,
+        x2: clamped.x,
+        y2: clamped.y,
+      };
+      activeShapeRef.current = nextShape;
+      setActiveShape(nextShape);
+      return;
+    }
+    if (activeStrokeRef.current) {
+      const nextStroke = appendStrokePoint(activeStrokeRef.current, clamped);
+      if (nextStroke !== activeStrokeRef.current) {
+        activeStrokeRef.current = nextStroke;
+        setActiveStroke(nextStroke);
+      }
+    }
+  }, []);
+
+  const enterDocMode = useCallback((nextMode: DocInteractionMode) => {
+    activeHoldRef.current = 'none';
+    setIsErasing(false);
+    setIsCursorScrubbing(false);
+    setModeSelectorActive(false);
+    setDocMode(nextMode);
+    setDrawSubmenu(null);
+    setWriteSubmenu(null);
+    hoverOriginRef.current = penPosRef.current;
+    sensorRef.current?.captureReference();
+    const label = DOC_MODES.find(m => m.id === nextMode)?.label ?? nextMode;
+    showToast(label);
+  }, [showToast]);
+
+  const openDocument = useCallback(
+    (docId: string) => {
+      activeHoldRef.current = 'none';
+      setActiveDocId(docId);
+      setScreen('DOCUMENT');
+      setDocMode('VIEW');
+      setModeSelectorActive(false);
+      setHoveredModeIndex(0);
+      setZoom(1.0);
+      setPanX(0);
+      setPanY(0);
+      setDrawSubmenu(null);
+      setWriteSubmenu(null);
+      setCardOptionsDocId(null);
+      setDeleteConfirmDocId(null);
+      hoverOriginRef.current = { x: A4_WIDTH * 0.5, y: A4_HEIGHT * 0.35 };
+      setPenPos({ x: A4_WIDTH * 0.5, y: A4_HEIGHT * 0.35 });
+      pushHistorySubstate();
+    },
+    [pushHistorySubstate],
+  );
+
+  const handleCreateNewDoc = useCallback(() => {
+    const maxNum = docsRef.current.reduce((m, d) => Math.max(m, d.docNumber), 0);
+    const created = createEmptyDocument(maxNum + 1);
+    setDocs(prev => sortDocsWithPinnedFirst([...prev, created]));
+    openDocument(created.id);
+    showToast(`Created Document ${created.docNumber}`);
+  }, [openDocument, showToast]);
+
+  const handleTogglePinDoc = useCallback(
+    (docId: string) => {
+      setDocs(prev => {
+        const next = prev.map(d => (d.id === docId ? { ...d, pinned: !d.pinned } : d));
+        return sortDocsWithPinnedFirst(next);
+      });
+      setCardOptionsDocId(null);
+      setMenuSelectedIndex(0);
+      showToast('Updated document pin');
+    },
+    [showToast],
+  );
+
+  const handleConfirmDeleteDoc = useCallback(
+    (docId: string) => {
+      setDocs(prev => {
+        const remaining = prev.filter(d => d.id !== docId);
+        setMenuSelectedIndex(idx => Math.max(0, Math.min(idx, remaining.length)));
+        return remaining;
+      });
+      undoMapRef.current.delete(docId);
+      setDeleteConfirmDocId(null);
+      setCardOptionsDocId(null);
+      showToast('Document deleted');
+    },
+    [showToast],
+  );
+
+  // Initialize WristSensorController once
+  useEffect(() => {
+    const controller = new WristSensorController({
+      initialMappingMode: settings.wristMappingMode,
+      onReading: t => {
+        setTelemetry(t);
+        if (!t.deltaPointing || screenRef.current !== 'DOCUMENT') return;
+
+        const { dx, dy } = t.deltaPointing;
+        const hold = activeHoldRef.current;
+
+        // 1. Bottom Mode Bar hover via forearm roll (from View, Write, or Draw disambiguated)
+        if (hold === 'mode-select') {
+          const offset = Math.round(t.rollDeg / MODE_ROLL_STEP_DEG);
+          const originIdx = DOC_MODES.findIndex(m => m.id === preSelectorModeRef.current);
+          const nextIdx = Math.max(0, Math.min(DOC_MODES.length - 1, originIdx + offset));
+          hoveredModeIdxRef.current = nextIdx;
+          setHoveredModeIndex(nextIdx);
+          return;
+        }
+
+        const mode = docModeRef.current;
+
+        // 2. VIEW MODE: 1x Hold + Rotate = Zoom, 1x Hold + Move = Pan
+        if (mode === 'VIEW' && hold === 'view-zoom-pan') {
+          const rawZoom = zoomOriginRef.current + t.rollDeg * ZOOM_ROLL_SENSITIVITY;
+          const nextZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, rawZoom));
+          const scaleFactor = POINTER_SCALE / Math.max(1, nextZoom * 0.75);
+          const targetPan = clampPanToZoom(
+            panOriginRef.current.panX + dx * scaleFactor,
+            panOriginRef.current.panY + dy * scaleFactor,
+            nextZoom,
+          );
+          setZoom(nextZoom);
+          setPanX(targetPan.panX);
+          setPanY(targetPan.panY);
+          return;
+        }
+
+        // 3. DRAW MODE
+        if (mode === 'DRAW') {
+          const deltaPxX = dx * POINTER_SCALE;
+          const deltaPxY = dy * POINTER_SCALE;
+
+          // Disambiguate 2x Hold in Drawing mode between Eraser (translation) and Mode Select (roll)
+          if (hold === 'double-pending') {
+            if (Math.abs(t.rollDeg) >= DOUBLE_HOLD_ROLL_DEG) {
+              activeHoldRef.current = 'mode-select';
+              preSelectorModeRef.current = 'DRAW';
+              hoveredModeIdxRef.current = 1;
+              setHoveredModeIndex(1);
+              setModeSelectorActive(true);
+              return;
+            }
+            if (Math.hypot(deltaPxX, deltaPxY) >= DOUBLE_HOLD_TRANSLATE_PX) {
+              activeHoldRef.current = 'draw-erase';
+              eraseUndoPushedRef.current = false;
+              erasePrevPosRef.current = penPosRef.current;
+              setIsErasing(true);
+            } else {
+              return;
+            }
+          }
+
+          if (activeHoldRef.current === 'draw-erase') {
+            const nextPt = clampA4Point(
+              drawOriginRef.current.x + deltaPxX,
+              drawOriginRef.current.y + deltaPxY,
+            );
+            applyEraserSegment(erasePrevPosRef.current, nextPt);
+            erasePrevPosRef.current = nextPt;
+            setPenPos(nextPt);
+            return;
+          }
+
+          if (activeHoldRef.current === 'draw-paint') {
+            const target = clampA4Point(
+              drawOriginRef.current.x + deltaPxX,
+              drawOriginRef.current.y + deltaPxY,
+            );
+            // Smooth 2.5px lazy-brush filter to tame wristband jitter while staying responsive
+            const cur = penPosRef.current;
+            const dist = Math.hypot(target.x - cur.x, target.y - cur.y);
+            const smoothed =
+              dist <= 2.5
+                ? target
+                : {
+                    x: cur.x + (target.x - cur.x) * 0.68,
+                    y: cur.y + (target.y - cur.y) * 0.68,
+                  };
+            setPenPos(smoothed);
+            updateDrawOrShapeAt(smoothed);
+            return;
+          }
+
+          // Continuous Draw crosshair hover when not holding
+          if (activeHoldRef.current === 'none') {
+            const target = clampA4Point(
+              hoverOriginRef.current.x + deltaPxX,
+              hoverOriginRef.current.y + deltaPxY,
+            );
+            const cur = penPosRef.current;
+            const smoothed = {
+              x: cur.x + (target.x - cur.x) * 0.55,
+              y: cur.y + (target.y - cur.y) * 0.55,
+            };
+            setPenPos(smoothed);
+          }
+          return;
+        }
+
+        // 4. WRITE MODE: 1x Hold + Rotate Arm scrubs character cursor along line
+        if (mode === 'WRITE' && hold === 'write-scrub') {
+          const doc = activeDocRef.current;
+          if (!doc) return;
+          const block = doc.blocks[doc.cursor.lineIndex];
+          const maxChar = block ? block.text.length : 0;
+          const stepOffset = Math.round(t.rollDeg / CURSOR_SCRUB_STEP_DEG);
+          const nextChar = Math.max(0, Math.min(maxChar, writeScrubOriginCharRef.current + stepOffset));
+          if (nextChar !== doc.cursor.charIndex) {
+            setDocs(prev =>
+              prev.map(d =>
+                d.id === doc.id
+                  ? { ...d, cursor: { ...d.cursor, charIndex: nextChar } }
+                  : d,
+              ),
+            );
+          }
+        }
+      },
+    });
+    sensorRef.current = controller;
+    controller.start();
+    return () => controller.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Writing operations
+  const handleCommitText = useCallback(
+    (incomingText: string) => {
+      if (!incomingText) return;
+      updateActiveDocument(doc => {
+        const lineIdx = Math.max(0, Math.min(doc.blocks.length - 1, doc.cursor.lineIndex));
+        const blocks = doc.blocks.map((blk, i) => {
+          if (i !== lineIdx) return blk;
+          const c = Math.max(0, Math.min(blk.text.length, doc.cursor.charIndex));
+          return {
+            ...blk,
+            text: `${blk.text.slice(0, c)}${incomingText}${blk.text.slice(c)}`,
+          };
+        });
+        return {
+          ...doc,
+          updatedAt: Date.now(),
+          blocks,
+          cursor: {
+            lineIndex: lineIdx,
+            charIndex: (doc.cursor.charIndex || 0) + incomingText.length,
+          },
+        };
+      }, true);
+    },
+    [updateActiveDocument],
+  );
+
+  const handleNewLine = useCallback(() => {
+    updateActiveDocument(doc => {
+      const lineIdx = Math.max(0, Math.min(doc.blocks.length - 1, doc.cursor.lineIndex));
+      const curBlk = doc.blocks[lineIdx];
+      const splitAt = Math.max(0, Math.min(curBlk.text.length, doc.cursor.charIndex));
+      const before = curBlk.text.slice(0, splitAt);
+      const after = curBlk.text.slice(splitAt);
+      const nextKind: BlockKind =
+        curBlk.kind === 'bullet' || curBlk.kind === 'numbered' ? curBlk.kind : 'p';
+      const updatedCurrent: DocBlock = { ...curBlk, text: before };
+      const inserted: DocBlock = {
+        id: makeId('blk'),
+        kind: nextKind,
+        text: after,
+        fontSize: curBlk.fontSize ?? 15,
+      };
+      const blocks = [
+        ...doc.blocks.slice(0, lineIdx),
+        updatedCurrent,
+        inserted,
+        ...doc.blocks.slice(lineIdx + 1),
+      ];
+      return {
+        ...doc,
+        updatedAt: Date.now(),
+        blocks,
+        cursor: { lineIndex: lineIdx + 1, charIndex: 0 },
+      };
+    }, true);
+  }, [updateActiveDocument]);
+
+  const handleBackspace = useCallback(() => {
+    updateActiveDocument(doc => {
+      const lineIdx = Math.max(0, Math.min(doc.blocks.length - 1, doc.cursor.lineIndex));
+      const curBlk = doc.blocks[lineIdx];
+      const c = Math.max(0, Math.min(curBlk.text.length, doc.cursor.charIndex));
+      if (c > 0) {
+        const blocks = doc.blocks.map((b, i) =>
+          i === lineIdx ? { ...b, text: `${b.text.slice(0, c - 1)}${b.text.slice(c)}` } : b,
+        );
+        return {
+          ...doc,
+          updatedAt: Date.now(),
+          blocks,
+          cursor: { lineIndex: lineIdx, charIndex: c - 1 },
+        };
+      }
+      if (lineIdx > 0) {
+        const prevBlk = doc.blocks[lineIdx - 1];
+        const mergedChar = prevBlk.text.length;
+        const merged: DocBlock = { ...prevBlk, text: prevBlk.text + curBlk.text };
+        const blocks = [
+          ...doc.blocks.slice(0, lineIdx - 1),
+          merged,
+          ...doc.blocks.slice(lineIdx + 1),
+        ];
+        return {
+          ...doc,
+          updatedAt: Date.now(),
+          blocks,
+          cursor: { lineIndex: lineIdx - 1, charIndex: mergedChar },
+        };
+      }
+      return doc;
+    }, true);
+  }, [updateActiveDocument]);
+
+  const moveWriteLine = useCallback(
+    (delta: -1 | 1) => {
+      updateActiveDocument(doc => {
+        const nextLine = Math.max(
+          0,
+          Math.min(doc.blocks.length - 1, doc.cursor.lineIndex + delta),
+        );
+        const len = doc.blocks[nextLine]?.text.length ?? 0;
+        return {
+          ...doc,
+          cursor: { lineIndex: nextLine, charIndex: Math.min(doc.cursor.charIndex, len) },
+        };
+      });
+    },
+    [updateActiveDocument],
+  );
+
+  // Middle Finger / Back hierarchical navigation
+  const handleMiddleFingerBack = useCallback(() => {
+    const activeEl = document.activeElement as HTMLElement | null;
+    if (
+      activeEl &&
+      (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')
+    ) {
+      activeEl.blur();
+    }
+
+    if (screen === 'MENU') {
+      if (deleteConfirmDocId) {
+        setDeleteConfirmDocId(null);
+        return;
+      }
+      if (cardOptionsDocId) {
+        setCardOptionsDocId(null);
+        return;
+      }
+      if (menuFocusArea === 'GEAR') {
+        setMenuFocusArea('CARDS');
+      }
       return;
     }
 
-    if (stroke && stroke.points.length >= 2) {
-      commitDocUpdate(prev => ({
-        ...prev,
-        strokes: [...prev.strokes, stroke],
-      }));
-      showToast(`Ink stroke saved (${stroke.points.length} pts)`);
+    if (screen === 'SETTINGS') {
+      setScreen('MENU');
+      showToast('Menu');
+      return;
     }
-  }, [commitDocUpdate, showToast]);
 
-  const startWristEraseHold = useCallback(
-    (pointerStart?: { x: number; y: number }) => {
-      commitPendingDraftIfAny();
-      if (modeRef.current === 'COMPOSER') {
-        composerInputRef.current?.blur();
+    // screen === 'DOCUMENT'
+    if (modeSelectorActive) {
+      activeHoldRef.current = 'none';
+      setModeSelectorActive(false);
+      setDocMode(preSelectorModeRef.current);
+      showToast('Mode selection cancelled');
+      return;
+    }
+
+    if (docMode === 'DRAW' && drawSubmenu !== null) {
+      setDrawSubmenu(null);
+      return;
+    }
+
+    if (docMode === 'WRITE' && writeSubmenu !== null) {
+      setWriteSubmenu(null);
+      return;
+    }
+
+    // Top level of any document mode -> save & return to Menu
+    commitActiveInkOrShape();
+    activeHoldRef.current = 'none';
+    setIsErasing(false);
+    setIsCursorScrubbing(false);
+    setScreen('MENU');
+    setActiveDocId(null);
+    showToast('Saved & returned to Menu');
+  }, [
+    cardOptionsDocId,
+    commitActiveInkOrShape,
+    deleteConfirmDocId,
+    docMode,
+    drawSubmenu,
+    menuFocusArea,
+    modeSelectorActive,
+    screen,
+    showToast,
+    writeSubmenu,
+  ]);
+
+  const backHandlerRef = useRef(handleMiddleFingerBack);
+  backHandlerRef.current = handleMiddleFingerBack;
+
+  // Browser / Android WebView Back button (`popstate`) mapped to Middle Finger Back
+  useEffect(() => {
+    const onPopState = () => {
+      const wasInSubScreen = screenRef.current !== 'MENU';
+      const hadOverlayInDoc =
+        screenRef.current === 'DOCUMENT' &&
+        (modeSelectorActive ||
+          (docModeRef.current === 'DRAW' && drawSubmenu !== null) ||
+          (docModeRef.current === 'WRITE' && writeSubmenu !== null));
+      backHandlerRef.current();
+      if (wasInSubScreen && hadOverlayInDoc) {
+        pushHistorySubstate();
       }
-      sensorRef.current?.captureReference();
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [drawSubmenu, modeSelectorActive, pushHistorySubstate, writeSubmenu]);
 
-      const usePointerOrigin = Boolean(pointerStart && telemetryStatusRef.current !== 'live');
-      const origin =
-        usePointerOrigin && pointerStart
-          ? pointerStart
-          : {
-            x: penPosRef.current.x,
-            y: clamp(88 + docRef.current.cursor.lineIndex * 36, 40, maxSheetHeight - 40),
-          };
+  // Confirm hovered mode from bottom bar
+  const confirmHoveredMode = useCallback(() => {
+    const target = DOC_MODES[hoveredModeIdxRef.current]?.id ?? docMode;
+    enterDocMode(target);
+  }, [enterDocMode, docMode]);
 
-      drawOriginRef.current = origin;
-      penPosRef.current = origin;
-      setPenPos(origin);
-      eraseSessionSnapshotRef.current = null;
-      erasedCountRef.current = 0;
-      setMode('ERASE_HOLD');
-      modeRef.current = 'ERASE_HOLD';
-      eraseStrokesAt(origin, origin);
+  // Toolbar option handlers
+  const handleSelectDrawTop = useCallback(
+    (idx: number, submenu: Exclude<DrawSubmenu, null>) => {
+      setDrawTopIndex(idx);
+      setDrawSubmenu(submenu);
+      setDrawSubIndex(0);
     },
-    [commitPendingDraftIfAny, eraseStrokesAt, maxSheetHeight],
+    [],
   );
 
-  const handleEraseHoldMove = useCallback(
-    (x: number, y: number) => {
-      if (telemetryStatusRef.current === 'live') return;
-      if (modeRef.current !== 'ERASE_HOLD') return;
-      const now = performance.now();
-      if (now - lastDrawTickRef.current < 16) return;
-      lastDrawTickRef.current = now;
-
-      const prevPen = penPosRef.current;
-      const nextPos = { x, y };
-      penPosRef.current = nextPos;
-      setPenPos(nextPos);
-      eraseStrokesAt(prevPen, nextPos);
+  const handleSelectWriteTop = useCallback(
+    (idx: number, submenu: Exclude<WriteSubmenu, null>) => {
+      setWriteTopIndex(idx);
+      setWriteSubmenu(submenu);
+      setWriteSubIndex(0);
+      if (submenu === 'input') {
+        window.setTimeout(() => writerInputRef.current?.focus(), 20);
+      }
     },
-    [eraseStrokesAt],
+    [],
   );
 
-  const finishWristEraseHold = useCallback(() => {
-    const count = erasedCountRef.current;
-    eraseSessionSnapshotRef.current = null;
-    erasedCountRef.current = 0;
-    sensorRef.current?.clearReference();
-    setMode('DOCUMENT');
-    modeRef.current = 'DOCUMENT';
-    if (count > 0) {
-      showToast(`Erased ${count} line${count === 1 ? '' : 's'}`);
-    } else {
-      showToast('Eraser released');
+  const applyDrawSubOption = useCallback((submenu: Exclude<DrawSubmenu, null>, idx: number) => {
+    if (submenu === 'thickness') {
+      const val = LINE_THICKNESSES[idx] ?? LINE_THICKNESSES[0];
+      setSelectedThickness(val);
+      showToast(`Thickness: ${val}px`);
+    } else if (submenu === 'color') {
+      const item = TWENTY_COLORS[idx] ?? TWENTY_COLORS[0];
+      setSelectedColor(item.hex);
+      showToast(`Color: ${item.name}`);
+    } else if (submenu === 'brush') {
+      const item = BRUSH_TYPES[idx] ?? BRUSH_TYPES[0];
+      setSelectedBrush(item.id);
+      setDrawTool('brush');
+      showToast(`Brush: ${item.label}`);
+    } else if (submenu === 'shape') {
+      const item = SHAPE_TYPES[idx] ?? SHAPE_TYPES[0];
+      setSelectedShape(item.id);
+      setDrawTool('shape');
+      showToast(`Shape: ${item.label}`);
+    } else if (submenu === 'fill') {
+      const item = TWENTY_COLORS[idx] ?? TWENTY_COLORS[0];
+      setSelectedFillColor(item.hex);
+      showToast(`Fill color: ${item.name}`);
     }
   }, [showToast]);
 
-  // Toolbar Actions: Left/Right switches category, Up/Down cycles options or toggles binary state
-  const stepBlockKind = useCallback(
-    (delta: -1 | 1) => {
-      commitDocUpdate(prev => {
-        const target = prev.blocks[prev.cursor.lineIndex];
-        if (!target) return prev;
-        const currIdx = Math.max(0, BLOCK_KINDS.indexOf(target.kind));
-        const nextIdx = (currIdx + delta + BLOCK_KINDS.length) % BLOCK_KINDS.length;
-        const nextKind = BLOCK_KINDS[nextIdx];
-        const blocks = [...prev.blocks];
-        blocks[prev.cursor.lineIndex] = { ...target, kind: nextKind };
-        showToast(`Style: ${nextKind.toUpperCase()}`);
-        return { ...prev, blocks };
-      });
+  const applyWriteStyleOption = useCallback(
+    (kind: BlockKind, idx: number) => {
+      setWriteSubIndex(idx);
+      updateActiveDocument(doc => {
+        const lineIdx = doc.cursor.lineIndex;
+        const defaultSize =
+          kind === 'h1' ? 22 : kind === 'h2' ? 18 : kind === 'h3' ? 16 : 15;
+        return {
+          ...doc,
+          updatedAt: Date.now(),
+          blocks: doc.blocks.map((b, i) =>
+            i === lineIdx ? { ...b, kind, fontSize: defaultSize } : b,
+          ),
+        };
+      }, true);
     },
-    [commitDocUpdate, showToast],
+    [updateActiveDocument],
   );
 
-  const toggleBold = useCallback(() => {
-    commitDocUpdate(prev => {
-      const target = prev.blocks[prev.cursor.lineIndex];
-      if (!target) return prev;
-      const blocks = [...prev.blocks];
-      blocks[prev.cursor.lineIndex] = { ...target, bold: !target.bold };
-      showToast(target.bold ? 'Bold: Off' : 'Bold: On');
-      return { ...prev, blocks };
-    });
-  }, [commitDocUpdate, showToast]);
+  const toggleWriteFormatOption = useCallback(
+    (fmt: 'bold' | 'italic' | 'underline', idx: number) => {
+      setWriteSubIndex(idx);
+      updateActiveDocument(doc => {
+        const lineIdx = doc.cursor.lineIndex;
+        return {
+          ...doc,
+          updatedAt: Date.now(),
+          blocks: doc.blocks.map((b, i) =>
+            i === lineIdx ? { ...b, [fmt]: !b[fmt] } : b,
+          ),
+        };
+      }, true);
+    },
+    [updateActiveDocument],
+  );
 
-  const toggleItalic = useCallback(() => {
-    commitDocUpdate(prev => {
-      const target = prev.blocks[prev.cursor.lineIndex];
-      if (!target) return prev;
-      const blocks = [...prev.blocks];
-      blocks[prev.cursor.lineIndex] = { ...target, italic: !target.italic };
-      showToast(target.italic ? 'Italic: Off' : 'Italic: On');
-      return { ...prev, blocks };
-    });
-  }, [commitDocUpdate, showToast]);
+  const applyWriteSizeOption = useCallback(
+    (pt: number, idx: number) => {
+      setWriteSubIndex(idx);
+      updateActiveDocument(doc => {
+        const lineIdx = doc.cursor.lineIndex;
+        return {
+          ...doc,
+          updatedAt: Date.now(),
+          blocks: doc.blocks.map((b, i) => (i === lineIdx ? { ...b, fontSize: pt } : b)),
+        };
+      }, true);
+    },
+    [updateActiveDocument],
+  );
 
-  const exportMarkdown = useCallback(() => {
-    const mdLines = doc.blocks.map(b => {
-      const text = b.bold ? `**${b.text}**` : b.italic ? `*${b.text}*` : b.text;
-      if (b.kind === 'h1') return `# ${text}`;
-      if (b.kind === 'h2') return `## ${text}`;
-      if (b.kind === 'bullet') return `- ${text}`;
-      if (b.kind === 'quote') return `> ${text}`;
-      return text;
-    });
-    const content = `# ${doc.title}\n\n${mdLines.join('\n')}\n\n<!-- Ink strokes: ${doc.strokes.length} -->\n`;
-    const blob = new Blob([content], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'neuraldoc.md';
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast('Exported neuraldoc.md');
-  }, [doc, showToast]);
+  const applyWriteListOption = useCallback(
+    (kind: BlockKind, idx: number) => {
+      setWriteSubIndex(idx);
+      updateActiveDocument(doc => {
+        const lineIdx = doc.cursor.lineIndex;
+        return {
+          ...doc,
+          updatedAt: Date.now(),
+          blocks: doc.blocks.map((b, i) => (i === lineIdx ? { ...b, kind } : b)),
+        };
+      }, true);
+    },
+    [updateActiveDocument],
+  );
 
-  const activeBlock = doc.blocks[doc.cursor.lineIndex];
-  const activeStyleIdx = Math.max(0, BLOCK_KINDS.indexOf(activeBlock?.kind ?? 'p'));
-
-  const capabilityReport: InputCapabilityReport = useMemo(() => {
-    const win = window as unknown as Record<string, unknown>;
-    const nav = navigator as unknown as Record<string, unknown>;
-    return {
-      emgWristStatus: telemetry.status,
-      activeElementTag: activeElTag,
-      hasInputEvents: typeof InputEvent !== 'undefined',
-      hasCompositionEvents: typeof CompositionEvent !== 'undefined',
-      hasVirtualKeyboard: 'virtualKeyboard' in nav,
-      hasSpeechRecognition: Boolean(win.SpeechRecognition || win.webkitSpeechRecognition),
-      lastRawEvents: rawEventLog,
-    };
-  }, [activeElTag, rawEventLog, telemetry.status]);
-
-  const toolbarActions = useMemo(
-    () => [
-      {
-        id: 'style',
-        label: `Style: ${(activeBlock?.kind ?? 'p').toUpperCase()}`,
-        options: ['P', 'H1', 'H2', 'BULLET', 'QUOTE'],
-        activeOptionIndex: activeStyleIdx,
-        onStep: (delta: -1 | 1) => stepBlockKind(delta),
-        onSelectOption: (idx: number) => {
-          const nextKind = BLOCK_KINDS[idx];
-          if (!nextKind) return;
-          commitDocUpdate(prev => {
-            const target = prev.blocks[prev.cursor.lineIndex];
-            if (!target) return prev;
-            const blocks = [...prev.blocks];
-            blocks[prev.cursor.lineIndex] = { ...target, kind: nextKind };
-            showToast(`Style: ${nextKind.toUpperCase()}`);
-            return { ...prev, blocks };
-          });
-        },
-      },
-      {
-        id: 'bold',
-        label: activeBlock?.bold ? 'Bold: On ✓' : 'Bold: Off',
-        options: ['Off', 'On'],
-        activeOptionIndex: activeBlock?.bold ? 1 : 0,
-        onStep: () => toggleBold(),
-        onSelectOption: (idx: number) => {
-          const nextBold = idx === 1;
-          commitDocUpdate(prev => {
-            const target = prev.blocks[prev.cursor.lineIndex];
-            if (!target) return prev;
-            const blocks = [...prev.blocks];
-            blocks[prev.cursor.lineIndex] = { ...target, bold: nextBold };
-            showToast(nextBold ? 'Bold: On' : 'Bold: Off');
-            return { ...prev, blocks };
-          });
-        },
-      },
-      {
-        id: 'italic',
-        label: activeBlock?.italic ? 'Italic: On ✓' : 'Italic: Off',
-        options: ['Off', 'On'],
-        activeOptionIndex: activeBlock?.italic ? 1 : 0,
-        onStep: () => toggleItalic(),
-        onSelectOption: (idx: number) => {
-          const nextItalic = idx === 1;
-          commitDocUpdate(prev => {
-            const target = prev.blocks[prev.cursor.lineIndex];
-            if (!target) return prev;
-            const blocks = [...prev.blocks];
-            blocks[prev.cursor.lineIndex] = { ...target, italic: nextItalic };
-            showToast(nextItalic ? 'Italic: On' : 'Italic: Off');
-            return { ...prev, blocks };
-          });
-        },
-      },
-      {
-        id: 'ink-color',
-        label: `Ink: ${PEN_COLORS[penColorIdx].name}`,
-        options: PEN_COLORS.map(c => c.name),
-        activeOptionIndex: penColorIdx,
-        onStep: (delta: -1 | 1) => {
-          const next = (penColorIdx + delta + PEN_COLORS.length) % PEN_COLORS.length;
-          setPenColorIdx(next);
-          showToast(`Ink: ${PEN_COLORS[next].name}`);
-        },
-        onSelectOption: (idx: number) => {
-          setPenColorIdx(idx);
-          showToast(`Ink: ${PEN_COLORS[idx].name}`);
-        },
-      },
-      {
-        id: 'ink-size',
-        label: `Pen: ${PEN_WIDTHS[penWidthIdx]}px`,
-        options: PEN_WIDTHS.map(w => `${w}px`),
-        activeOptionIndex: penWidthIdx,
-        onStep: (delta: -1 | 1) => {
-          const next = (penWidthIdx + delta + PEN_WIDTHS.length) % PEN_WIDTHS.length;
-          setPenWidthIdx(next);
-          showToast(`Pen width: ${PEN_WIDTHS[next]}px`);
-        },
-        onSelectOption: (idx: number) => {
-          setPenWidthIdx(idx);
-          showToast(`Pen width: ${PEN_WIDTHS[idx]}px`);
-        },
-      },
-      {
-        id: 'new-line',
-        label: '+ Line',
-        options: ['Insert New Line'],
-        activeOptionIndex: 0,
-        onStep: () => insertNewLineAtCursor(),
-        onSelectOption: () => insertNewLineAtCursor(),
-      },
-      {
-        id: 'undo',
-        label: 'Undo',
-        options: ['Undo Last Edit'],
-        activeOptionIndex: 0,
-        onStep: () => handleUndo(),
-        onSelectOption: () => handleUndo(),
-      },
-      {
-        id: 'clear-ink',
-        label: 'Clear Ink',
-        options: ['Erase Drawings'],
-        activeOptionIndex: 0,
-        onStep: () => {
-          commitDocUpdate(prev => ({ ...prev, strokes: [] }));
-          showToast('Cleared drawings');
-        },
-        onSelectOption: () => {
-          commitDocUpdate(prev => ({ ...prev, strokes: [] }));
-          showToast('Cleared drawings');
-        },
-      },
-      {
-        id: 'export',
-        label: 'Export',
-        options: ['Download .MD'],
-        activeOptionIndex: 0,
-        onStep: () => exportMarkdown(),
-        onSelectOption: () => exportMarkdown(),
-      },
-      {
-        id: 'reset',
-        label: 'Reset',
-        options: ['Reset Document'],
-        activeOptionIndex: 0,
-        onStep: () => {
-          commitDocUpdate(() => createInitialDocument());
-          showToast('Document reset');
-        },
-        onSelectOption: () => {
-          commitDocUpdate(() => createInitialDocument());
-          showToast('Document reset');
-        },
-      },
-      {
-        id: 'done',
-        label: 'Done',
-        options: ['Exit Toolbar'],
-        activeOptionIndex: 0,
-        onStep: () => setMode('DOCUMENT'),
-        onSelectOption: () => setMode('DOCUMENT'),
-      },
-    ],
+  const applyWriteSubOption = useCallback(
+    (submenu: Exclude<WriteSubmenu, null>, idx: number) => {
+      if (submenu === 'style') {
+        const opt = WRITE_STYLE_OPTIONS[idx];
+        if (opt) applyWriteStyleOption(opt.kind, idx);
+      } else if (submenu === 'format') {
+        const keys = ['bold', 'italic', 'underline'] as const;
+        const fmt = keys[idx];
+        if (fmt) toggleWriteFormatOption(fmt, idx);
+      } else if (submenu === 'size') {
+        const pt = FONT_SIZES[idx];
+        if (pt) applyWriteSizeOption(pt, idx);
+      } else if (submenu === 'list') {
+        const opt = WRITE_LIST_OPTIONS[idx];
+        if (opt) applyWriteListOption(opt.kind, idx);
+      } else if (submenu === 'input') {
+        writerInputRef.current?.focus();
+      }
+    },
     [
-      activeBlock,
-      activeStyleIdx,
-      commitDocUpdate,
-      exportMarkdown,
-      handleUndo,
-      insertNewLineAtCursor,
-      penColorIdx,
-      penWidthIdx,
-      showToast,
-      stepBlockKind,
-      toggleBold,
-      toggleItalic,
+      applyWriteListOption,
+      applyWriteSizeOption,
+      applyWriteStyleOption,
+      toggleWriteFormatOption,
     ],
   );
 
-  // Sync focus & scroll active toolbar pill horizontally into view when in TOOLBAR mode
-  useEffect(() => {
-    if (mode === 'TOOLBAR') {
-      const btn = toolbarBtnRefs.current[toolbarIndex];
-      btn?.focus();
-      btn?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
-    }
-  }, [mode, toolbarIndex]);
+  // Unified Wristband Gesture Handlers
+  const handleSwipe = useCallback(
+    (dir: 'up' | 'down' | 'left' | 'right') => {
+      if (screen === 'MENU') {
+        if (deleteConfirmDocId) {
+          if (dir === 'left' || dir === 'right') {
+            setDeleteConfirmYes(v => !v);
+          }
+          return;
+        }
+        if (cardOptionsDocId) {
+          if (dir === 'left' || dir === 'right') {
+            setCardOptionIndex(i => (i === 0 ? 1 : 0));
+          }
+          return;
+        }
+        if (dir === 'up') {
+          setMenuFocusArea('GEAR');
+          return;
+        }
+        if (dir === 'down') {
+          setMenuFocusArea('CARDS');
+          return;
+        }
+        if (menuFocusArea === 'CARDS') {
+          setMenuSelectedIndex(idx =>
+            Math.max(0, Math.min(docs.length, idx + (dir === 'right' ? 1 : -1))),
+          );
+        }
+        return;
+      }
 
-  const controls = useWristbandControls({
-    mode,
-    isLiveWristSensor: telemetry.status === 'live',
-    onSwipeUp: handleSwipeUp,
-    onSwipeDown: handleSwipeDown,
-    onSwipeLeft: handleSwipeLeft,
-    onSwipeRight: handleSwipeRight,
-    onTipSingleTap: () => {
-      setMode('COMPOSER');
-      modeRef.current = 'COMPOSER';
-      composerInputRef.current?.focus();
-      showToast('Writer input focused — Click / Tip Tap to open glasses composer');
-    },
-    onTipDoubleTap: insertNewLineAtCursor,
-    onTipTripleTap: () => {
-      commitPendingDraftIfAny();
-      composerInputRef.current?.blur();
-      setMode(curr => (curr === 'TOOLBAR' ? 'DOCUMENT' : 'TOOLBAR'));
-    },
-    onTipHoldStart: startWristDrawHold,
-    onTipHoldMove: handleHoldMove,
-    onTipHoldEnd: finishWristDrawHold,
-    onTipDoubleHoldStart: startWristEraseHold,
-    onTipDoubleHoldMove: handleEraseHoldMove,
-    onTipDoubleHoldEnd: finishWristEraseHold,
-    onSideSingleTap: () => {
-      if (mode === 'TOOLBAR') {
-        setMode('DOCUMENT');
+      if (screen === 'SETTINGS') {
+        if (dir === 'up' || dir === 'down') {
+          setSettingsRowIndex(r => (r === 0 ? 1 : 0));
+          return;
+        }
+        if (dir === 'left' || dir === 'right') {
+          if (settingsRowIndex === 0) {
+            setSettings(s => ({
+              ...s,
+              themeMode: s.themeMode === 'transparent' ? 'light' : 'transparent',
+            }));
+          } else {
+            setSettings(s => ({
+              ...s,
+              wristMappingMode:
+                s.wristMappingMode === 'stretched-arm'
+                  ? 'horizontal-surface'
+                  : 'stretched-arm',
+            }));
+          }
+        }
         return;
       }
-      if (mode === 'COMPOSER') {
-        commitPendingDraftIfAny();
-        setMode('DOCUMENT');
-        composerInputRef.current?.blur();
+
+      // screen === 'DOCUMENT'
+      if (modeSelectorActive) {
+        if (dir === 'left' || dir === 'right') {
+          const nextIdx = Math.max(
+            0,
+            Math.min(DOC_MODES.length - 1, hoveredModeIndex + (dir === 'right' ? 1 : -1)),
+          );
+          hoveredModeIdxRef.current = nextIdx;
+          setHoveredModeIndex(nextIdx);
+        }
         return;
       }
-      backspaceAtCursor();
+
+      if (docMode === 'DRAW') {
+        if (drawSubmenu === null) {
+          if (dir === 'left' || dir === 'right') {
+            setDrawTopIndex(i =>
+              Math.max(0, Math.min(DRAW_TOP_ITEMS.length - 1, i + (dir === 'right' ? 1 : -1))),
+            );
+          }
+          return;
+        }
+        const maxLen =
+          drawSubmenu === 'thickness'
+            ? LINE_THICKNESSES.length
+            : drawSubmenu === 'color' || drawSubmenu === 'fill'
+              ? TWENTY_COLORS.length
+              : drawSubmenu === 'brush'
+                ? BRUSH_TYPES.length
+                : SHAPE_TYPES.length;
+        const delta =
+          dir === 'right'
+            ? 1
+            : dir === 'left'
+              ? -1
+              : (drawSubmenu === 'color' || drawSubmenu === 'fill') && dir === 'down'
+                ? 10
+                : (drawSubmenu === 'color' || drawSubmenu === 'fill') && dir === 'up'
+                  ? -10
+                  : 0;
+        if (delta !== 0) {
+          setDrawSubIndex(i => Math.max(0, Math.min(maxLen - 1, i + delta)));
+        }
+        return;
+      }
+
+      if (docMode === 'WRITE') {
+        if (dir === 'up') {
+          moveWriteLine(-1);
+          return;
+        }
+        if (dir === 'down') {
+          moveWriteLine(1);
+          return;
+        }
+        if (writeSubmenu === null) {
+          setWriteTopIndex(i =>
+            Math.max(0, Math.min(WRITE_TOP_ITEMS.length - 1, i + (dir === 'right' ? 1 : -1))),
+          );
+          return;
+        }
+        const maxLen =
+          writeSubmenu === 'style'
+            ? WRITE_STYLE_OPTIONS.length
+            : writeSubmenu === 'format'
+              ? 3
+              : writeSubmenu === 'size'
+                ? FONT_SIZES.length
+                : writeSubmenu === 'list'
+                  ? WRITE_LIST_OPTIONS.length
+                  : 1;
+        setWriteSubIndex(i => Math.max(0, Math.min(maxLen - 1, i + (dir === 'right' ? 1 : -1))));
+      }
     },
-    onSideDoubleTap: handleUndo,
-    onToolbarNavigate: dir => {
-      const len = toolbarActions.length;
-      if (dir === 'left') {
-        setToolbarIndex(idx => (idx - 1 + len) % len);
-      } else if (dir === 'right') {
-        setToolbarIndex(idx => (idx + 1) % len);
-      } else if (dir === 'up') {
-        toolbarActions[toolbarIndex]?.onStep(-1);
+    [
+      cardOptionsDocId,
+      deleteConfirmDocId,
+      docMode,
+      docs.length,
+      drawSubmenu,
+      hoveredModeIndex,
+      menuFocusArea,
+      modeSelectorActive,
+      moveWriteLine,
+      screen,
+      settingsRowIndex,
+      writeSubmenu,
+    ],
+  );
+
+  const handleTipSingleTap = useCallback(() => {
+    if (screen === 'MENU') {
+      if (deleteConfirmDocId) {
+        if (deleteConfirmYes) {
+          handleConfirmDeleteDoc(deleteConfirmDocId);
+        } else {
+          setDeleteConfirmDocId(null);
+        }
+        return;
+      }
+      if (cardOptionsDocId) {
+        if (cardOptionIndex === 0) {
+          handleTogglePinDoc(cardOptionsDocId);
+        } else {
+          setDeleteConfirmDocId(cardOptionsDocId);
+          setDeleteConfirmYes(false);
+        }
+        return;
+      }
+      if (menuFocusArea === 'GEAR') {
+        setScreen('SETTINGS');
+        setSettingsRowIndex(0);
+        pushHistorySubstate();
+        return;
+      }
+      if (menuSelectedIndex < docs.length) {
+        openDocument(docs[menuSelectedIndex].id);
       } else {
-        toolbarActions[toolbarIndex]?.onStep(1);
+        handleCreateNewDoc();
       }
-    },
-    onToolbarActivate: () => {
-      toolbarActions[toolbarIndex]?.onStep(1);
-    },
+      return;
+    }
+
+    if (screen === 'SETTINGS') {
+      if (settingsRowIndex === 0) {
+        setSettings(s => ({
+          ...s,
+          themeMode: s.themeMode === 'transparent' ? 'light' : 'transparent',
+        }));
+      } else {
+        setSettings(s => ({
+          ...s,
+          wristMappingMode:
+            s.wristMappingMode === 'stretched-arm'
+              ? 'horizontal-surface'
+              : 'stretched-arm',
+        }));
+      }
+      return;
+    }
+
+    // screen === 'DOCUMENT'
+    if (modeSelectorActive) {
+      confirmHoveredMode();
+      return;
+    }
+
+    if (docMode === 'DRAW') {
+      if (drawSubmenu === null) {
+        const chosen = DRAW_TOP_ITEMS[drawTopIndex];
+        if (chosen) handleSelectDrawTop(drawTopIndex, chosen.id);
+      } else {
+        applyDrawSubOption(drawSubmenu, drawSubIndex);
+      }
+      return;
+    }
+
+    if (docMode === 'WRITE') {
+      if (writeSubmenu === null) {
+        const chosen = WRITE_TOP_ITEMS[writeTopIndex];
+        if (chosen) handleSelectWriteTop(writeTopIndex, chosen.id);
+      } else {
+        applyWriteSubOption(writeSubmenu, writeSubIndex);
+      }
+    }
+  }, [
+    applyDrawSubOption,
+    applyWriteSubOption,
+    cardOptionIndex,
+    cardOptionsDocId,
+    confirmHoveredMode,
+    deleteConfirmDocId,
+    deleteConfirmYes,
+    docMode,
+    docs,
+    drawSubIndex,
+    drawSubmenu,
+    drawTopIndex,
+    handleConfirmDeleteDoc,
+    handleCreateNewDoc,
+    handleSelectDrawTop,
+    handleSelectWriteTop,
+    handleTogglePinDoc,
+    menuFocusArea,
+    menuSelectedIndex,
+    modeSelectorActive,
+    openDocument,
+    pushHistorySubstate,
+    screen,
+    settingsRowIndex,
+    writeSubIndex,
+    writeSubmenu,
+    writeTopIndex,
+  ]);
+
+  const handleTipDoubleTap = useCallback(() => {
+    if (screen === 'DOCUMENT' && docMode === 'DRAW') {
+      hoverOriginRef.current = penPosRef.current;
+      sensorRef.current?.captureReference();
+      showToast('Re-centered pen');
+    }
+  }, [docMode, screen, showToast]);
+
+  const handleTipTripleTap = useCallback(() => {
+    if (screen === 'DOCUMENT') {
+      handleUndo();
+    }
+  }, [handleUndo, screen]);
+
+  const handleTipHoldStart = useCallback(() => {
+    if (screen === 'MENU') {
+      if (
+        !cardOptionsDocId &&
+        !deleteConfirmDocId &&
+        menuFocusArea === 'CARDS' &&
+        menuSelectedIndex < docs.length
+      ) {
+        setCardOptionsDocId(docs[menuSelectedIndex].id);
+        setCardOptionIndex(0);
+      }
+      return;
+    }
+
+    if (screen !== 'DOCUMENT') return;
+
+    if (modeSelectorActive) {
+      confirmHoveredMode();
+      return;
+    }
+
+    sensorRef.current?.captureReference();
+
+    if (docMode === 'VIEW') {
+      activeHoldRef.current = 'view-zoom-pan';
+      zoomOriginRef.current = zoomRef.current;
+      panOriginRef.current = panRef.current;
+      return;
+    }
+
+    if (docMode === 'DRAW') {
+      activeHoldRef.current = 'draw-paint';
+      drawHoldStartedAtRef.current = performance.now();
+      drawOriginRef.current = penPosRef.current;
+      beginDrawOrShapeAt(penPosRef.current);
+      return;
+    }
+
+    if (docMode === 'WRITE') {
+      const doc = activeDocRef.current;
+      if (!doc) return;
+      activeHoldRef.current = 'write-scrub';
+      writeScrubOriginCharRef.current = doc.cursor.charIndex;
+      setIsCursorScrubbing(true);
+    }
+  }, [
+    beginDrawOrShapeAt,
+    cardOptionsDocId,
+    confirmHoveredMode,
+    deleteConfirmDocId,
+    docMode,
+    docs,
+    menuFocusArea,
+    menuSelectedIndex,
+    modeSelectorActive,
+    screen,
+  ]);
+
+  const handleTipHoldEnd = useCallback(() => {
+    const hold = activeHoldRef.current;
+    activeHoldRef.current = 'none';
+    setIsCursorScrubbing(false);
+
+    if (hold === 'draw-paint') {
+      const hadMovement =
+        (activeStrokeRef.current?.points.length ?? 0) > 1 ||
+        Boolean(
+          activeShapeRef.current &&
+            (Math.abs(activeShapeRef.current.x2 - activeShapeRef.current.x1) >= 4 ||
+              Math.abs(activeShapeRef.current.y2 - activeShapeRef.current.y1) >= 4),
+        );
+      commitActiveInkOrShape();
+      hoverOriginRef.current = penPosRef.current;
+      sensorRef.current?.clearReference();
+      if (!hadMovement && performance.now() - drawHoldStartedAtRef.current < 260) {
+        // Ignore sub-threshold tap jitter
+      }
+    }
+  }, [commitActiveInkOrShape]);
+
+  const handleTipDoubleHoldStart = useCallback(() => {
+    if (screen !== 'DOCUMENT') return;
+    sensorRef.current?.captureReference();
+
+    if (docMode === 'DRAW') {
+      activeHoldRef.current = 'double-pending';
+      drawOriginRef.current = penPosRef.current;
+      return;
+    }
+
+    // View & Write modes: 2x Hold + Rotate hovers modes along Bottom Mode Bar
+    activeHoldRef.current = 'mode-select';
+    preSelectorModeRef.current = docMode;
+    const idx = DOC_MODES.findIndex(m => m.id === docMode);
+    hoveredModeIdxRef.current = idx >= 0 ? idx : 0;
+    setHoveredModeIndex(hoveredModeIdxRef.current);
+    setModeSelectorActive(true);
+  }, [docMode, screen]);
+
+  const handleTipDoubleHoldEnd = useCallback(() => {
+    const hold = activeHoldRef.current;
+    activeHoldRef.current = 'none';
+
+    if (hold === 'draw-erase') {
+      setIsErasing(false);
+      eraseUndoPushedRef.current = false;
+      hoverOriginRef.current = penPosRef.current;
+      sensorRef.current?.clearReference();
+      return;
+    }
+
+    if (hold === 'mode-select') {
+      // Keep hovered mode open for 1x Tap confirmation or Middle Finger cancellation
+      sensorRef.current?.clearReference();
+    }
+  }, []);
+
+  useWristbandControls({
+    screen,
+    docMode,
+    isLiveWristSensor: telemetry.status === 'live',
+    onSwipe: handleSwipe,
+    onTipSingleTap: handleTipSingleTap,
+    onTipDoubleTap: handleTipDoubleTap,
+    onTipTripleTap: handleTipTripleTap,
+    onTipHoldStart: handleTipHoldStart,
+    onTipHoldEnd: handleTipHoldEnd,
+    onTipDoubleHoldStart: handleTipDoubleHoldStart,
+    onTipDoubleHoldEnd: handleTipDoubleHoldEnd,
+    onMiddleFingerBack: handleMiddleFingerBack,
+    onUndoShortcut: handleUndo,
     onGestureLog: logGesture,
   });
 
-  const handleSimulatedPose = useCallback((yawDeg: number, pitchDeg: number, rollDeg: number) => {
-    const d2r = Math.PI / 180;
-    sensorRef.current?.pushSimulatedEuler(yawDeg * d2r, pitchDeg * d2r, rollDeg * d2r);
+  // Pointer/mouse canvas handlers (desktop testing & touch support)
+  const handleSheetPointerDown = useCallback(
+    (x: number, y: number, clientX: number, clientY: number) => {
+      if (docMode === 'VIEW') {
+        pointerDragKindRef.current = 'pan';
+        pointerPanStartRef.current = {
+          clientX,
+          clientY,
+          panX: panRef.current.panX,
+          panY: panRef.current.panY,
+        };
+      } else if (docMode === 'DRAW') {
+        pointerDragKindRef.current = 'draw';
+        const pt = clampA4Point(x, y);
+        setPenPos(pt);
+        beginDrawOrShapeAt(pt);
+      }
+    },
+    [beginDrawOrShapeAt, docMode],
+  );
+
+  const handleSheetPointerMove = useCallback(
+    (x: number, y: number, clientX: number, clientY: number, isDown: boolean) => {
+      if (docMode === 'DRAW') {
+        const pt = clampA4Point(x, y);
+        setPenPos(pt);
+        if (isDown && pointerDragKindRef.current === 'draw') {
+          updateDrawOrShapeAt(pt);
+        }
+        return;
+      }
+      if (docMode === 'VIEW' && isDown && pointerDragKindRef.current === 'pan') {
+        const dx = clientX - pointerPanStartRef.current.clientX;
+        const dy = clientY - pointerPanStartRef.current.clientY;
+        const nextPan = clampPanToZoom(
+          pointerPanStartRef.current.panX + dx,
+          pointerPanStartRef.current.panY + dy,
+          zoomRef.current,
+        );
+        setPanX(nextPan.panX);
+        setPanY(nextPan.panY);
+      }
+    },
+    [docMode, updateDrawOrShapeAt],
+  );
+
+  const handleSheetPointerUp = useCallback(() => {
+    if (pointerDragKindRef.current === 'draw') {
+      commitActiveInkOrShape();
+    }
+    pointerDragKindRef.current = 'none';
+  }, [commitActiveInkOrShape]);
+
+  const handleSelectLine = useCallback(
+    (lineIndex: number, charIndex?: number) => {
+      updateActiveDocument(doc => {
+        const clampedLine = Math.max(0, Math.min(doc.blocks.length - 1, lineIndex));
+        const len = doc.blocks[clampedLine]?.text.length ?? 0;
+        const nextChar =
+          typeof charIndex === 'number' ? Math.max(0, Math.min(len, charIndex)) : len;
+        return {
+          ...doc,
+          cursor: { lineIndex: clampedLine, charIndex: nextChar },
+        };
+      });
+    },
+    [updateActiveDocument],
+  );
+
+  const handleRecordRawInputEvent = useCallback((eventName: string, detail: string) => {
+    setRawInputEvents(prev => [`${eventName}: ${detail}`, ...prev].slice(0, 6));
   }, []);
 
-  const selectedToolbarItem = toolbarActions[toolbarIndex];
+  const capabilityReport = useMemo<InputCapabilityReport>(() => {
+    const base = readInputCapabilityBaseline(telemetry.status);
+    return {
+      ...base,
+      lastRawEvents: rawInputEvents,
+    };
+  }, [rawInputEvents, telemetry.status]);
+
+  const activeBlock = useMemo(() => {
+    if (!activeDoc) return undefined;
+    return activeDoc.blocks[activeDoc.cursor.lineIndex];
+  }, [activeDoc]);
 
   return (
-    <main className={`app-root ${simulatorFrame ? 'is-framed-600' : 'is-fullscreen'}`}>
-      <div className="glasses-stage">
+    <div
+      className={`glasses-viewport-host ${simulatorFrame ? 'has-sim-frame' : ''} ${
+        settings.themeMode === 'light' ? 'is-theme-light' : 'is-theme-transparent'
+      }`}
+    >
+      <main
+        className={`glasses-stage ${
+          screen === 'DOCUMENT' ? 'is-document-screen' : 'is-menu-screen'
+        }`}
+      >
         <WristTelemetryHud
           telemetry={telemetry}
-          mode={mode}
+          screen={screen}
+          docMode={docMode}
+          wristMappingMode={settings.wristMappingMode}
           lastGesture={lastGesture}
           simulatorFrame={simulatorFrame}
           showEmulatorPanel={showEmulatorPanel}
           onToggleSimulatorFrame={() => setSimulatorFrame(v => !v)}
           onToggleEmulatorPanel={() => setShowEmulatorPanel(v => !v)}
-          onSimulatedPose={handleSimulatedPose}
-          onStartHoldDrawSim={() => {
-            logGesture('Sim 1x Hold', 'Draw / Rotate Arm Cursor');
-            startWristDrawHold();
+          onSimulatedPose={(yaw, pitch, roll) =>
+            sensorRef.current?.pushSimulatedEuler(
+              (yaw * Math.PI) / 180,
+              (pitch * Math.PI) / 180,
+              (roll * Math.PI) / 180,
+            )
+          }
+          onStartHold1Sim={() => {
+            logGesture('Sim Hold 1x', 'Start');
+            handleTipHoldStart();
           }}
-          onEndHoldDrawSim={() => {
-            logGesture('Sim 1x Release', 'Draw / scrub finished');
-            finishWristDrawHold();
+          onEndHold1Sim={() => {
+            logGesture('Sim Hold 1x', 'End');
+            handleTipHoldEnd();
           }}
-          onStartHoldEraseSim={() => {
-            logGesture('Sim 2x Hold', 'Eraser active');
-            startWristEraseHold();
+          onStartHold2Sim={() => {
+            logGesture('Sim Hold 2x', 'Start');
+            handleTipDoubleHoldStart();
           }}
-          onEndHoldEraseSim={() => {
-            logGesture('Sim 2x Release', 'Eraser finished');
-            finishWristEraseHold();
+          onEndHold2Sim={() => {
+            logGesture('Sim Hold 2x', 'End');
+            handleTipDoubleHoldEnd();
           }}
           onSimSwipe={dir => {
-            if (mode === 'TOOLBAR') {
-              const len = toolbarActions.length;
-              if (dir === 'left') {
-                logGesture('Swipe LEFT', 'Previous toolbar item');
-                setToolbarIndex(idx => (idx - 1 + len) % len);
-              } else if (dir === 'right') {
-                logGesture('Swipe RIGHT', 'Next toolbar item');
-                setToolbarIndex(idx => (idx + 1) % len);
-              } else if (dir === 'up') {
-                logGesture('Swipe UP', 'Previous option / toggle');
-                toolbarActions[toolbarIndex]?.onStep(-1);
-              } else {
-                logGesture('Swipe DOWN', 'Next option / toggle');
-                toolbarActions[toolbarIndex]?.onStep(1);
-              }
-              return;
-            }
-            if (dir === 'up') {
-              logGesture('Swipe Up', 'Scroll / previous line');
-              handleSwipeUp();
-            } else if (dir === 'down') {
-              logGesture('Swipe Down', 'Scroll / next line');
-              handleSwipeDown();
-            } else if (dir === 'left') {
-              logGesture('Swipe Left', 'Cursor left in line');
-              handleSwipeLeft();
-            } else {
-              logGesture('Swipe Right', 'Cursor right in line');
-              handleSwipeRight();
-            }
+            logGesture(`Sim Swipe ${dir}`, 'Band Sim');
+            handleSwipe(dir);
           }}
-          onSimTipTap={count => controls.simulateTipTaps(count)}
-          onSimSideTap={count => controls.simulateSideTaps(count)}
-        />
-
-        <DocumentCanvas
-          title={doc.title}
-          blocks={doc.blocks}
-          cursor={doc.cursor}
-          composerDraft=""
-          strokes={doc.strokes}
-          activeStroke={activeStroke}
-          penPos={penPos}
-          penColor={currentColor}
-          rollDeg={telemetry.rollDeg}
-          mode={mode}
-          scrollRef={scrollRef}
-          onSelectLine={(lineIndex, charIndex) => {
-            commitPendingDraftIfAny();
-            setDoc(prev => ({
-              ...prev,
-              cursor: {
-                lineIndex,
-                charIndex: charIndex ?? prev.blocks[lineIndex]?.text.length ?? 0,
-              },
-            }));
+          onSimTipTap={count => {
+            logGesture(`Sim Tap ${count}x`, 'Band Sim');
+            if (count === 1) handleTipSingleTap();
+            else if (count === 2) handleTipDoubleTap();
+            else handleTipTripleTap();
           }}
-          onSheetPointerDown={(x, y) => controls.beginPointerTipPress(x, y)}
-          onSheetPointerMove={(x, y) => controls.movePointerTipPress(x, y)}
-          onSheetPointerUp={() => controls.endPointerTipPress()}
-          onSheetPointerCancel={() => controls.cancelPointerTipPress()}
-        />
-
-        <NeuralComposer
-          mode={mode}
-          inputRef={composerInputRef}
-          capabilityReport={capabilityReport}
-          showProbe={showProbe}
-          onToggleProbe={() => setShowProbe(v => !v)}
-          onCommitText={text => {
-            insertTextAtCursor(text);
-            showToast(`Committed "${text.slice(0, 20)}${text.length > 20 ? '…' : ''}"`);
-          }}
-          onBackspace={backspaceAtCursor}
-          onUndo={handleUndo}
-          onRequestWriteMode={() => {
-            setMode('COMPOSER');
-            modeRef.current = 'COMPOSER';
-            composerInputRef.current?.focus();
-          }}
-          onExitComposer={() => {
-            commitPendingDraftIfAny();
-            setMode('DOCUMENT');
-            modeRef.current = 'DOCUMENT';
-            composerInputRef.current?.blur();
-          }}
-          onOpenToolbar={() => {
-            commitPendingDraftIfAny();
-            composerInputRef.current?.blur();
-            setMode(curr => (curr === 'TOOLBAR' ? 'DOCUMENT' : 'TOOLBAR'));
-          }}
-          onRecordRawInputEvent={recordRawInputEvent}
-          onInputFocusChange={focused => {
-            if (focused) {
-              setMode('COMPOSER');
-              modeRef.current = 'COMPOSER';
-            } else if (modeRef.current === 'COMPOSER') {
-              setMode('DOCUMENT');
-              modeRef.current = 'DOCUMENT';
-            }
+          onSimMiddleFingerBack={() => {
+            logGesture('Sim Middle Finger', 'Back');
+            handleMiddleFingerBack();
           }}
         />
 
-        <section className="toolbar-zone" aria-label="Word formatting and drawing toolbar">
-          {mode === 'TOOLBAR' && selectedToolbarItem && (
-            <div className="toolbar-options-subbar" role="status" aria-live="polite">
-              <span className="subbar-hint">↑↓ Select/Toggle:</span>
-              <div className="subbar-chips">
-                {selectedToolbarItem.options.map((opt, optIdx) => (
-                  <button
-                    key={opt}
-                    type="button"
-                    tabIndex={-1}
-                    className={`option-chip ${selectedToolbarItem.activeOptionIndex === optIdx ? 'is-active-option' : ''
-                      }`}
-                    onClick={() => selectedToolbarItem.onSelectOption(optIdx)}
-                  >
-                    {opt}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <nav className={`word-toolbar-dock ${mode === 'TOOLBAR' ? 'is-toolbar-focused' : ''}`}>
-            {toolbarActions.map((action, idx) => (
-              <button
-                key={action.id}
-                ref={el => {
-                  toolbarBtnRefs.current[idx] = el;
-                }}
-                type="button"
-                tabIndex={mode === 'TOOLBAR' ? 0 : -1}
-                className={`toolbar-pill ${mode === 'TOOLBAR' && toolbarIndex === idx ? 'is-selected' : ''
-                  }`}
-                onClick={() => {
-                  setToolbarIndex(idx);
-                  action.onStep(1);
-                }}
-              >
-                {action.id === 'ink-color' && (
-                  <span
-                    className="color-swatch"
-                    style={{ backgroundColor: currentColor }}
-                    aria-hidden="true"
-                  />
-                )}
-                {action.label}
-              </button>
-            ))}
-          </nav>
-        </section>
-
-        <footer className="wristband-legend" aria-label="Wristband control map">
-          {mode === 'TOOLBAR' ? (
-            <>
-              <span>←→ Category</span>
-              <span>↑↓ Option / Toggle</span>
-              <span>1x Tip Apply</span>
-              <span>Side / 3x Tip Exit</span>
-            </>
-          ) : mode === 'COMPOSER' ? (
-            <>
-              <span>Tip Click Open OS Composer</span>
-              <span>↑↓ Move Between Fields</span>
-              <span>Side / Done Return</span>
-            </>
-          ) : (
-            <>
-              <span>↑↓ Focus / Scroll</span>
-              <span>←→ / Hold+Rotate Cursor</span>
-              <span>1x Hold Draw</span>
-              <span>2x Hold Erase</span>
-              <span>3x Tip Menu</span>
-              <span>Side Del / 2x Undo</span>
-            </>
-          )}
-        </footer>
-
-        {toastMsg && (
-          <div className="glasses-toast" role="status" aria-live="polite">
-            {toastMsg}
-          </div>
+        {(screen === 'MENU' || screen === 'SETTINGS') && (
+          <MenuScreen
+            screen={screen}
+            docs={docs}
+            settings={settings}
+            menuFocusArea={menuFocusArea}
+            menuSelectedIndex={menuSelectedIndex}
+            cardOptionsDocId={cardOptionsDocId}
+            cardOptionIndex={cardOptionIndex}
+            deleteConfirmDocId={deleteConfirmDocId}
+            deleteConfirmYes={deleteConfirmYes}
+            settingsRowIndex={settingsRowIndex}
+            onSelectGear={() => {
+              setMenuFocusArea('GEAR');
+              setScreen('SETTINGS');
+              setSettingsRowIndex(0);
+              pushHistorySubstate();
+            }}
+            onOpenDoc={openDocument}
+            onCreateNewDoc={handleCreateNewDoc}
+            onTogglePinDoc={handleTogglePinDoc}
+            onRequestDeleteDoc={docId => {
+              setDeleteConfirmDocId(docId);
+              setDeleteConfirmYes(false);
+            }}
+            onConfirmDeleteDoc={handleConfirmDeleteDoc}
+            onCancelDeleteDoc={() => setDeleteConfirmDocId(null)}
+            onCloseCardOptions={() => setCardOptionsDocId(null)}
+            onSetThemeMode={themeMode => setSettings(s => ({ ...s, themeMode }))}
+            onSetWristMappingMode={wristMappingMode =>
+              setSettings(s => ({ ...s, wristMappingMode }))
+            }
+            onBackFromSettings={() => setScreen('MENU')}
+          />
         )}
-      </div>
-    </main>
+
+        {screen === 'DOCUMENT' && activeDoc && (
+          <>
+            <DocumentCanvas
+              doc={activeDoc}
+              themeMode={settings.themeMode}
+              mode={docMode}
+              zoom={zoom}
+              panX={panX}
+              panY={panY}
+              activeStroke={activeStroke}
+              activeShape={activeShape}
+              penPos={penPos}
+              penColor={selectedColor}
+              penWidth={selectedThickness}
+              rollDeg={telemetry.rollDeg}
+              isErasing={isErasing}
+              isCursorScrubbing={isCursorScrubbing}
+              isLiveWristSensor={telemetry.status === 'live'}
+              onSelectLine={handleSelectLine}
+              onSheetPointerDown={handleSheetPointerDown}
+              onSheetPointerMove={handleSheetPointerMove}
+              onSheetPointerUp={handleSheetPointerUp}
+              onSheetPointerCancel={handleSheetPointerUp}
+            />
+
+            <DocumentToolbars
+              mode={docMode}
+              modeSelectorActive={modeSelectorActive}
+              hoveredModeIndex={hoveredModeIndex}
+              drawSubmenu={drawSubmenu}
+              drawTopIndex={drawTopIndex}
+              drawSubIndex={drawSubIndex}
+              drawTool={drawTool}
+              selectedThickness={selectedThickness}
+              selectedColor={selectedColor}
+              selectedFillColor={selectedFillColor}
+              selectedBrush={selectedBrush}
+              selectedShape={selectedShape}
+              writeSubmenu={writeSubmenu}
+              writeTopIndex={writeTopIndex}
+              writeSubIndex={writeSubIndex}
+              activeBlock={activeBlock}
+              writerInputRef={writerInputRef}
+              capabilityReport={capabilityReport}
+              showProbe={showProbe}
+              onSelectModeDirect={enterDocMode}
+              onSelectDrawTop={handleSelectDrawTop}
+              onBackDrawSubmenu={() => setDrawSubmenu(null)}
+              onPickThickness={(px, idx) => {
+                setDrawSubIndex(idx);
+                setSelectedThickness(px);
+                showToast(`Thickness: ${px}px`);
+              }}
+              onPickColor={(hex, idx) => {
+                setDrawSubIndex(idx);
+                setSelectedColor(hex);
+                const name = TWENTY_COLORS[idx]?.name ?? hex;
+                showToast(`Color: ${name}`);
+              }}
+              onPickBrush={(brush, idx) => {
+                setDrawSubIndex(idx);
+                setSelectedBrush(brush);
+                setDrawTool('brush');
+                showToast(`Brush: ${brush}`);
+              }}
+              onPickShape={(shape, idx) => {
+                setDrawSubIndex(idx);
+                setSelectedShape(shape);
+                setDrawTool('shape');
+                showToast(`Shape: ${shape}`);
+              }}
+              onPickFillColor={(hex, idx) => {
+                setDrawSubIndex(idx);
+                setSelectedFillColor(hex);
+                const name = TWENTY_COLORS[idx]?.name ?? hex;
+                showToast(`Fill: ${name}`);
+              }}
+              onSelectWriteTop={handleSelectWriteTop}
+              onBackWriteSubmenu={() => setWriteSubmenu(null)}
+              onPickWriteStyle={applyWriteStyleOption}
+              onToggleWriteFormat={toggleWriteFormatOption}
+              onPickWriteSize={applyWriteSizeOption}
+              onPickWriteList={applyWriteListOption}
+              onToggleProbe={() => setShowProbe(v => !v)}
+              onCommitText={handleCommitText}
+              onNewLine={handleNewLine}
+              onBackspace={handleBackspace}
+              onUndo={handleUndo}
+              onRecordRawInputEvent={handleRecordRawInputEvent}
+            />
+          </>
+        )}
+
+        {toast && <div className="glasses-toast">{toast}</div>}
+      </main>
+    </div>
   );
 }
 
+export default App;

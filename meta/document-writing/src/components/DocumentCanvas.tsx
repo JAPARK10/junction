@@ -1,308 +1,221 @@
-import React, { useEffect, useRef } from 'react';
-import type {
-  CursorPosition,
-  DocBlock,
-  InkPoint,
-  InkStroke,
-  InteractionMode,
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  A4_HEIGHT,
+  A4_WIDTH,
+  type A4Document,
+  type DocInteractionMode,
+  type DocShape,
+  type InkStroke,
+  type ThemeMode,
 } from '../types/document';
-
-export const LOGICAL_PAGE_WIDTH = 540;
+import { A4PaperView } from './A4PaperView';
 
 interface DocumentCanvasProps {
-  title: string;
-  blocks: DocBlock[];
-  cursor: CursorPosition;
-  composerDraft: string;
-  strokes: InkStroke[];
+  doc: A4Document;
+  themeMode: ThemeMode;
+  mode: DocInteractionMode;
+  zoom: number;
+  panX: number;
+  panY: number;
   activeStroke: InkStroke | null;
+  activeShape: DocShape | null;
   penPos: { x: number; y: number };
   penColor: string;
+  penWidth: number;
   rollDeg: number;
-  composerPreview?: string | null;
-  mode: InteractionMode;
-  scrollRef: React.RefObject<HTMLDivElement | null>;
+  isErasing: boolean;
+  isCursorScrubbing: boolean;
+  isLiveWristSensor: boolean;
   onSelectLine: (lineIndex: number, charIndex?: number) => void;
-  onSheetPointerDown: (x: number, y: number) => void;
-  onSheetPointerMove: (x: number, y: number) => void;
+  onSheetPointerDown: (x: number, y: number, clientX: number, clientY: number) => void;
+  onSheetPointerMove: (x: number, y: number, clientX: number, clientY: number, isDown: boolean) => void;
   onSheetPointerUp: () => void;
   onSheetPointerCancel: () => void;
 }
 
-function buildSmoothSvgPath(points: InkPoint[]): string {
-  if (points.length === 0) return '';
-  if (points.length === 1) {
-    const p = points[0];
-    return `M ${p.x.toFixed(1)} ${p.y.toFixed(1)} L ${(p.x + 0.2).toFixed(1)} ${(p.y + 0.2).toFixed(1)}`;
-  }
+const MINIMAP_W = 64;
+const MINIMAP_H = Math.round((MINIMAP_W * A4_HEIGHT) / A4_WIDTH);
 
-  let d = `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
-  for (let i = 1; i < points.length - 1; i += 1) {
-    const curr = points[i];
-    const next = points[i + 1];
-    const midX = (curr.x + next.x) * 0.5;
-    const midY = (curr.y + next.y) * 0.5;
-    d += ` Q ${curr.x.toFixed(1)} ${curr.y.toFixed(1)} ${midX.toFixed(1)} ${midY.toFixed(1)}`;
-  }
-  const last = points[points.length - 1];
-  d += ` L ${last.x.toFixed(1)} ${last.y.toFixed(1)}`;
-  return d;
-}
-
-function computeAvgWidth(stroke: InkStroke): number {
-  if (stroke.points.length === 0) return stroke.baseWidth;
-  const total = stroke.points.reduce((acc, pt) => acc + pt.width, 0);
-  return total / stroke.points.length;
-}
-
-export function DocumentCanvas({
-  title,
-  blocks,
-  cursor,
-  composerDraft,
-  strokes,
+export const DocumentCanvas: React.FC<DocumentCanvasProps> = ({
+  doc,
+  themeMode,
+  mode,
+  zoom,
+  panX,
+  panY,
   activeStroke,
+  activeShape,
   penPos,
   penColor,
+  penWidth,
   rollDeg,
-  composerPreview = null,
-  mode,
-  scrollRef,
+  isErasing,
+  isCursorScrubbing,
+  isLiveWristSensor,
   onSelectLine,
   onSheetPointerDown,
   onSheetPointerMove,
   onSheetPointerUp,
   onSheetPointerCancel,
-}: DocumentCanvasProps) {
-  const pageSheetRef = useRef<HTMLDivElement | null>(null);
-  const lineRefs = useRef<Record<string, HTMLDivElement | null>>({});
+}) => {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const paperTransformRef = useRef<HTMLDivElement | null>(null);
   const pointerDownRef = useRef(false);
-  const dragStartRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const [viewSize, setViewSize] = useState({ w: 540, h: 360 });
 
-  // Scroll the active cursor line into view smoothly whenever lineIndex changes.
   useEffect(() => {
-    const activeBlock = blocks[cursor.lineIndex];
-    if (!activeBlock) return;
-    const el = lineRefs.current[activeBlock.id];
-    if (el) {
-      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    const el = viewportRef.current;
+    if (!el) return;
+    const measure = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 10 && rect.height > 10) {
+        setViewSize({ w: rect.width, h: rect.height });
+      }
+    };
+    measure();
+    if (typeof ResizeObserver !== 'undefined') {
+      const obs = new ResizeObserver(measure);
+      obs.observe(el);
+      return () => obs.disconnect();
     }
-  }, [blocks, cursor.lineIndex]);
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [mode]);
 
-  const toLogicalCoords = (clientX: number, clientY: number): { x: number; y: number } => {
-    const sheet = pageSheetRef.current;
-    if (!sheet) return { x: LOGICAL_PAGE_WIDTH * 0.5, y: 120 };
-    const rect = sheet.getBoundingClientRect();
-    const scaleX = LOGICAL_PAGE_WIDTH / Math.max(1, rect.width);
-    const x = Math.max(4, Math.min(LOGICAL_PAGE_WIDTH - 4, (clientX - rect.left) * scaleX));
-    const y = Math.max(4, Math.min(rect.height * scaleX - 4, (clientY - rect.top) * scaleX));
+  const baseScale = Math.max(
+    0.18,
+    Math.min((viewSize.w - 14) / A4_WIDTH, (viewSize.h - 14) / A4_HEIGHT),
+  );
+  const effectiveScale = baseScale * zoom;
+  const displayW = A4_WIDTH * effectiveScale;
+  const displayH = A4_HEIGHT * effectiveScale;
+
+  // Compute max pan limits so paper never leaves the viewport completely
+  const maxPanX = Math.max(0, (displayW - viewSize.w + 16) * 0.5);
+  const maxPanY = Math.max(0, (displayH - viewSize.h + 16) * 0.5);
+  const clampedPanX = Math.max(-maxPanX, Math.min(maxPanX, panX));
+  const clampedPanY = Math.max(-maxPanY, Math.min(maxPanY, panY));
+
+  // Visible region in A4 logical coordinates [0..A4_WIDTH, 0..A4_HEIGHT] for minimap red rect
+  const visHalfW = viewSize.w / 2 / effectiveScale;
+  const visHalfH = viewSize.h / 2 / effectiveScale;
+  const centerA4X = A4_WIDTH * 0.5 - clampedPanX / effectiveScale;
+  const centerA4Y = A4_HEIGHT * 0.5 - clampedPanY / effectiveScale;
+  const visLeft = Math.max(0, centerA4X - visHalfW);
+  const visRight = Math.min(A4_WIDTH, centerA4X + visHalfW);
+  const visTop = Math.max(0, centerA4Y - visHalfH);
+  const visBottom = Math.min(A4_HEIGHT, centerA4Y + visHalfH);
+
+  const rectLeftPct = (visLeft / A4_WIDTH) * 100;
+  const rectTopPct = (visTop / A4_HEIGHT) * 100;
+  const rectWidthPct = Math.max(8, ((visRight - visLeft) / A4_WIDTH) * 100);
+  const rectHeightPct = Math.max(8, ((visBottom - visTop) / A4_HEIGHT) * 100);
+
+  const toA4Coords = (clientX: number, clientY: number): { x: number; y: number } => {
+    const el = paperTransformRef.current;
+    if (!el) return { x: A4_WIDTH * 0.5, y: A4_HEIGHT * 0.5 };
+    const rect = el.getBoundingClientRect();
+    const x = Math.max(4, Math.min(A4_WIDTH - 4, ((clientX - rect.left) / Math.max(1, rect.width)) * A4_WIDTH));
+    const y = Math.max(4, Math.min(A4_HEIGHT - 4, ((clientY - rect.top) / Math.max(1, rect.height)) * A4_HEIGHT));
     return { x, y };
   };
 
-  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 && event.pointerType === 'mouse') return;
-    const sheet = pageSheetRef.current;
-    if (!sheet) return;
-
-    const coords = toLogicalCoords(event.clientX, event.clientY);
-    pointerDownRef.current = true;
-    dragStartRef.current = { x: coords.x, y: coords.y, moved: false };
-    try {
-      sheet.setPointerCapture(event.pointerId);
-    } catch {
-      // Synthetic pointer events in tests might not support capture
-    }
-    onSheetPointerDown(coords.x, coords.y);
-  };
-
-  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!pointerDownRef.current) return;
-    const coords = toLogicalCoords(event.clientX, event.clientY);
-    if (dragStartRef.current) {
-      const dist = Math.hypot(coords.x - dragStartRef.current.x, coords.y - dragStartRef.current.y);
-      if (dist > 8) {
-        dragStartRef.current.moved = true;
-      }
-    }
-    onSheetPointerMove(coords.x, coords.y);
-  };
-
-  const handlePointerFinish = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!pointerDownRef.current) return;
-    pointerDownRef.current = false;
-    const sheet = pageSheetRef.current;
-    if (sheet) {
-      try {
-        sheet.releasePointerCapture(event.pointerId);
-      } catch {
-        // Ignore if not captured
-      }
-    }
-    if (event.type === 'pointercancel') {
-      onSheetPointerCancel();
-    } else {
-      onSheetPointerUp();
-    }
-  };
-
-  const renderBlockContent = (block: DocBlock, index: number) => {
-    const isActiveLine = index === cursor.lineIndex;
-    const clampedCol = Math.max(0, Math.min(block.text.length, cursor.charIndex));
-    const before = block.text.slice(0, clampedCol);
-    const after = block.text.slice(clampedCol);
-
-    const textClasses = [
-      'doc-block-text',
-      `doc-kind-${block.kind}`,
-      block.bold ? 'is-bold' : '',
-      block.italic ? 'is-italic' : '',
-    ]
-      .filter(Boolean)
-      .join(' ');
-
-    return (
-      <div
-        key={block.id}
-        ref={el => {
-          lineRefs.current[block.id] = el;
-        }}
-        className={`doc-line ${isActiveLine ? 'is-active-line' : ''}`}
-        onClick={() => {
-          if (!dragStartRef.current?.moved) {
-            onSelectLine(index, block.text.length);
-          }
-        }}
-      >
-        <span className="doc-line-num" aria-hidden="true">
-          {index + 1}
-        </span>
-
-        <div className={textClasses}>
-          {block.kind === 'bullet' && (
-            <span className="doc-bullet-dot" aria-hidden="true">
-              •
-            </span>
-          )}
-          <span className="doc-text-run">
-            {isActiveLine ? (
-              <>
-                <span>{before}</span>
-                {composerDraft && (
-                  <span className="doc-draft-preview" aria-label="Pending neural text">
-                    {composerDraft}
-                  </span>
-                )}
-                <span
-                  className={`doc-cursor-caret ${mode === 'COMPOSER' ? 'is-composing' : ''}`}
-                  aria-label="Text cursor"
-                />
-                {mode === 'CURSOR_SCRUB' && (
-                  <span className="doc-cursor-zoom-badge" aria-live="polite">
-                    ◀ Col {clampedCol + 1} ▶ ({rollDeg > 0 ? `+${rollDeg}` : rollDeg}°)
-                  </span>
-                )}
-                {mode === 'COMPOSER' && composerPreview && (
-                  <span className="doc-composer-preview-pill" aria-live="polite">
-                    {composerPreview}
-                  </span>
-                )}
-                <span>{after}</span>
-                {block.text.length === 0 && !composerDraft && (
-                  <span className="doc-empty-hint">Empty line — 1x Tip Tap to Neural Write</span>
-                )}
-              </>
-            ) : (
-              <span>{block.text || '\u00A0'}</span>
-            )}
-          </span>
-        </div>
-      </div>
-    );
-  };
-
-  const allStrokes = activeStroke ? [...strokes, activeStroke] : strokes;
-  const sheetHeightPx = Math.max(480, blocks.length * 44 + 180);
-
   return (
     <div
-      ref={scrollRef}
-      className={`doc-scroll-viewport ${
-        mode === 'DRAW_HOLD'
-          ? 'is-draw-active'
-          : mode === 'ERASE_HOLD'
-            ? 'is-erase-active'
-            : mode === 'CURSOR_SCRUB'
-              ? 'is-scrub-active'
-              : ''
+      ref={viewportRef}
+      id="document-sheet"
+      tabIndex={0}
+      className={`doc-viewport-stage ${
+        mode === 'DRAW' ? 'is-draw-mode' : mode === 'WRITE' ? 'is-write-mode' : 'is-view-mode'
       }`}
-      aria-label="Word document workspace"
+      aria-label="A4 Document View"
+      onPointerDown={e => {
+        if (e.button !== 0 && e.pointerType === 'mouse') return;
+        pointerDownRef.current = true;
+        try {
+          viewportRef.current?.setPointerCapture(e.pointerId);
+        } catch {
+          // Ignore synthetic pointer capture error
+        }
+        const a4 = toA4Coords(e.clientX, e.clientY);
+        onSheetPointerDown(a4.x, a4.y, e.clientX, e.clientY);
+      }}
+      onPointerMove={e => {
+        if (!pointerDownRef.current && (mode !== 'DRAW' || isLiveWristSensor)) return;
+        const a4 = toA4Coords(e.clientX, e.clientY);
+        onSheetPointerMove(a4.x, a4.y, e.clientX, e.clientY, pointerDownRef.current);
+      }}
+      onPointerUp={e => {
+        if (!pointerDownRef.current) return;
+        pointerDownRef.current = false;
+        try {
+          viewportRef.current?.releasePointerCapture(e.pointerId);
+        } catch {
+          // Ignore
+        }
+        onSheetPointerUp();
+      }}
+      onPointerCancel={() => {
+        pointerDownRef.current = false;
+        onSheetPointerCancel();
+      }}
     >
+      {/* Scaled & Panned A4 Sheet */}
       <div
-        id="document-sheet"
-        ref={pageSheetRef}
-        tabIndex={0}
-        className="doc-page-sheet"
-        style={{ minHeight: `${sheetHeightPx}px` }}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerFinish}
-        onPointerCancel={handlePointerFinish}
+        ref={paperTransformRef}
+        className="doc-a4-transform-layer"
+        style={{
+          width: A4_WIDTH,
+          height: A4_HEIGHT,
+          transform: `translate(${clampedPanX}px, ${clampedPanY}px) scale(${effectiveScale})`,
+          transformOrigin: 'center center',
+        }}
       >
-        <div className="doc-page-header">
-          <span className="doc-page-badge">DOC</span>
-          <h1 className="doc-page-title">{title}</h1>
-          <span className="doc-page-meta">
-            Ln {cursor.lineIndex + 1}/{blocks.length} · Col {cursor.charIndex + 1}
-          </span>
-        </div>
+        <A4PaperView
+          doc={doc}
+          paperTheme={themeMode}
+          mode={mode}
+          activeStroke={activeStroke}
+          activeShape={activeShape}
+          penPos={penPos}
+          penColor={penColor}
+          penWidth={penWidth}
+          rollDeg={rollDeg}
+          isErasing={isErasing}
+          isCursorScrubbing={isCursorScrubbing}
+          showCursor={mode === 'WRITE'}
+          onSelectLine={onSelectLine}
+        />
+      </div>
 
-        <div className="doc-blocks-list">{blocks.map(renderBlockContent)}</div>
-
-        <svg
-          className="doc-ink-overlay"
-          viewBox={`0 0 ${LOGICAL_PAGE_WIDTH} ${sheetHeightPx}`}
-          preserveAspectRatio="none"
-          aria-hidden="true"
+      {/* Top-Right Total Document Minimap with Live Red Viewport Rectangle */}
+      <div
+        className="doc-minimap-box"
+        style={{ width: MINIMAP_W, height: MINIMAP_H }}
+        aria-label={`Document minimap, zoom ${zoom.toFixed(1)}x`}
+      >
+        <div
+          className="doc-minimap-scale"
+          style={{
+            width: A4_WIDTH,
+            height: A4_HEIGHT,
+            transform: `scale(${MINIMAP_W / A4_WIDTH})`,
+            transformOrigin: 'top left',
+          }}
         >
-          {allStrokes.map(stroke => (
-            <path
-              key={stroke.id}
-              d={buildSmoothSvgPath(stroke.points)}
-              fill="none"
-              stroke={stroke.color}
-              strokeWidth={computeAvgWidth(stroke)}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="doc-ink-path"
-            />
-          ))}
-
-          {mode === 'DRAW_HOLD' && (
-            <g transform={`translate(${penPos.x}, ${penPos.y})`}>
-              <circle r="11" fill="none" stroke={penColor} strokeWidth="1.6" opacity="0.65" />
-              <circle r="3.5" fill={penColor} />
-              <line x1="-15" y1="0" x2="-6" y2="0" stroke={penColor} strokeWidth="1.4" />
-              <line x1="6" y1="0" x2="15" y2="0" stroke={penColor} strokeWidth="1.4" />
-              <line x1="0" y1="-15" x2="0" y2="-6" stroke={penColor} strokeWidth="1.4" />
-              <line x1="0" y1="6" x2="0" y2="15" stroke={penColor} strokeWidth="1.4" />
-            </g>
-          )}
-
-          {mode === 'ERASE_HOLD' && (
-            <g transform={`translate(${penPos.x}, ${penPos.y})`}>
-              <circle
-                r="16"
-                fill="rgba(255, 117, 143, 0.16)"
-                stroke="#ff758f"
-                strokeWidth="1.8"
-                strokeDasharray="4 3"
-              />
-              <circle r="2.5" fill="#ff758f" />
-            </g>
-          )}
-        </svg>
+          <A4PaperView doc={doc} paperTheme="light" isThumbnail />
+        </div>
+        <div
+          className="doc-minimap-red-rect"
+          style={{
+            left: `${rectLeftPct}%`,
+            top: `${rectTopPct}%`,
+            width: `${rectWidthPct}%`,
+            height: `${rectHeightPct}%`,
+          }}
+        />
+        <span className="doc-minimap-zoom-tag">{zoom.toFixed(1)}x</span>
       </div>
     </div>
   );
-}
-
+};
