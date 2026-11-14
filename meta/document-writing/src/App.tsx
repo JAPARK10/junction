@@ -981,7 +981,7 @@ export default function App() {
       modeRef.current = 'ERASE_HOLD';
       eraseStrokesAt(origin, origin);
     },
-    [eraseStrokesAt, finalizeLiveTextSession, maxSheetHeight],
+    [commitPendingDraftIfAny, eraseStrokesAt, maxSheetHeight],
   );
 
   const handleEraseHoldMove = useCallback(

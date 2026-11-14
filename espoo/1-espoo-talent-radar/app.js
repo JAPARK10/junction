@@ -1,5 +1,6 @@
 // Espoo TalentPulse AI — Hiring Radar, Event Strategist & Anti-Bluff Gatekeeper
 
+const DEFAULT_GEMINI_API_KEY = ''; // <-- Paste your Gemini API key ('AIzaSy...') here OR via the top-right UI button
 const STORAGE_KEY_API = 'espoo_gemini_api_key';
 const STORAGE_KEY_MODEL = 'espoo_gemini_model';
 const STORAGE_KEY_EXPORT_EVENT = 'espoo_exported_event';
@@ -281,7 +282,7 @@ function initTabs() {
 // ==================== GEMINI API CLIENT & CONFIG ====================
 
 function getApiKey() {
-  return localStorage.getItem(STORAGE_KEY_API) || '';
+  return localStorage.getItem(STORAGE_KEY_API) || DEFAULT_GEMINI_API_KEY || '';
 }
 
 function getSelectedModel() {
@@ -684,9 +685,9 @@ function renderEmployers() {
             <!-- Skills -->
             <div class="flex flex-wrap gap-1.5 pt-1">
               ${emp.hotSkills
-                .slice(0, 4)
-                .map((s) => `<span class="text-[11px] px-2 py-0.5 rounded-md bg-slate-800/90 text-slate-300 border border-slate-700/70">${escapeHtml(s)}</span>`)
-                .join('')}
+          .slice(0, 4)
+          .map((s) => `<span class="text-[11px] px-2 py-0.5 rounded-md bg-slate-800/90 text-slate-300 border border-slate-700/70">${escapeHtml(s)}</span>`)
+          .join('')}
             </div>
           </div>
 
@@ -1102,8 +1103,8 @@ function renderEventBlueprint(bp) {
         <div class="text-xs font-bold uppercase tracking-wider text-indigo-400">3D Spatial Venue Flow</div>
         <div class="space-y-2">
           ${bp.agenda
-            .map(
-              (item) => `
+      .map(
+        (item) => `
             <div class="flex items-start justify-between gap-2 text-xs border-b border-slate-800/80 pb-1.5 last:border-0 last:pb-0">
               <div>
                 <span class="font-bold text-sky-300">${escapeHtml(item.time)}</span>
@@ -1112,8 +1113,8 @@ function renderEventBlueprint(bp) {
               <span class="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 shrink-0">${escapeHtml(item.room)}</span>
             </div>
           `
-            )
-            .join('')}
+      )
+      .join('')}
         </div>
       </div>
     </div>
@@ -1269,8 +1270,8 @@ function renderApplicantQueue() {
       ev.caliberScore >= 80
         ? 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30'
         : ev.caliberScore >= 55
-        ? 'bg-amber-500/15 text-amber-300 border-amber-400/30'
-        : 'bg-rose-500/15 text-rose-300 border-rose-400/30';
+          ? 'bg-amber-500/15 text-amber-300 border-amber-400/30'
+          : 'bg-rose-500/15 text-rose-300 border-rose-400/30';
 
     return `
       <button data-cand-id="${cand.id}" class="cand-queue-btn w-full text-left p-3 rounded-xl bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 hover:border-sky-500/40 transition space-y-1">
@@ -1414,8 +1415,8 @@ function renderVettingAudit(cand, ev, sourceLabel) {
     ev.caliberScore >= 80
       ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40'
       : ev.caliberScore >= 55
-      ? 'bg-amber-500/20 text-amber-300 border-amber-400/40'
-      : 'bg-rose-500/20 text-rose-300 border-rose-400/40';
+        ? 'bg-amber-500/20 text-amber-300 border-amber-400/40'
+        : 'bg-rose-500/20 text-rose-300 border-rose-400/40';
 
   panel.innerHTML = `
     <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-4 border-b border-slate-800">
@@ -1473,19 +1474,17 @@ function renderVettingAudit(cand, ev, sourceLabel) {
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div class="p-3.5 rounded-xl bg-emerald-950/20 border border-emerald-500/25">
           <div class="text-xs font-bold text-emerald-400 mb-1.5">Verified Technical Signals</div>
-          ${
-            ev.strengths.length
-              ? `<ul class="space-y-1 text-xs text-slate-200">${ev.strengths.map((s) => `<li>✓ ${escapeHtml(s)}</li>`).join('')}</ul>`
-              : `<p class="text-xs text-slate-500">No concrete technical depth signals verified.</p>`
-          }
+          ${ev.strengths.length
+      ? `<ul class="space-y-1 text-xs text-slate-200">${ev.strengths.map((s) => `<li>✓ ${escapeHtml(s)}</li>`).join('')}</ul>`
+      : `<p class="text-xs text-slate-500">No concrete technical depth signals verified.</p>`
+    }
         </div>
         <div class="p-3.5 rounded-xl bg-rose-950/20 border border-rose-500/25">
           <div class="text-xs font-bold text-rose-400 mb-1.5">Bluff / Risk Flags</div>
-          ${
-            ev.redFlags.length
-              ? `<ul class="space-y-1 text-xs text-rose-200">${ev.redFlags.map((r) => `<li>⚠ ${escapeHtml(r)}</li>`).join('')}</ul>`
-              : `<p class="text-xs text-emerald-300">No bluff or exaggeration flags detected.</p>`
-          }
+          ${ev.redFlags.length
+      ? `<ul class="space-y-1 text-xs text-rose-200">${ev.redFlags.map((r) => `<li>⚠ ${escapeHtml(r)}</li>`).join('')}</ul>`
+      : `<p class="text-xs text-emerald-300">No bluff or exaggeration flags detected.</p>`
+    }
         </div>
       </div>
     </div>
