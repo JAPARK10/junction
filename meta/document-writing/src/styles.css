@@ -315,6 +315,12 @@ body {
   user-select: none;
 }
 
+.doc-page-sheet:focus,
+.doc-page-sheet:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: -2px;
+}
+
 .doc-page-header {
   display: flex;
   align-items: center;
@@ -597,93 +603,42 @@ body {
   text-overflow: ellipsis;
 }
 
-.wrist-writer-dock {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 5px 7px;
-  border-radius: 10px;
-  background: rgba(12, 22, 34, 0.95);
-  border: 1px solid rgba(107, 241, 120, 0.48);
-  min-width: 0;
-}
-
-.writer-words-row,
-.writer-dial-ribbon {
+/* Plain Vanilla Glasses Test Field + Native Document Writer Input */
+.plain-test-bar {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 5px;
-  border-radius: 7px;
-  border: 1px solid transparent;
-  min-width: 0;
+  padding: 4px 8px;
+  border-radius: 10px;
+  background: rgba(20, 26, 36, 0.85);
+  border: 1px solid rgba(255, 209, 102, 0.38);
 }
 
-.writer-words-row.is-active-row,
-.writer-dial-ribbon.is-active-row {
-  border-color: var(--accent-mint);
-  background: rgba(107, 241, 120, 0.1);
-}
-
-.writer-row-tag {
+.plain-test-label {
   font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-  color: var(--text-secondary);
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: var(--accent-amber);
   white-space: nowrap;
 }
 
-.writer-words-list,
-.writer-dial-scroll {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  overflow-x: auto;
-  scrollbar-width: none;
+.plain-test-input {
   flex: 1 1 auto;
   min-width: 0;
-}
-
-.writer-chip,
-.dial-char-btn,
-.writer-case-btn {
-  flex-shrink: 0;
-  padding: 3px 7px;
+  padding: 6px 8px;
   border-radius: 7px;
-  border: 1px solid rgba(168, 183, 206, 0.25);
-  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 209, 102, 0.42);
+  background: rgba(0, 0, 0, 0.72);
   color: var(--text-primary);
   font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
+  touch-action: manipulation;
 }
 
-.dial-char-btn {
-  min-width: 26px;
-  text-align: center;
-  padding: 3px 6px;
-}
-
-.dial-char-btn.is-danger {
-  color: var(--accent-coral);
-}
-
-.writer-case-btn {
-  font-size: 10px;
-  color: var(--accent-cyan);
-}
-
-.writer-case-btn.is-upper {
-  background: rgba(69, 230, 255, 0.22);
-  border-color: var(--accent-cyan);
-}
-
-.writer-chip.is-selected,
-.dial-char-btn.is-selected {
-  background: var(--accent-mint);
-  border-color: #ffffff;
-  color: #031508;
-  transform: scale(1.06);
+.plain-test-input:focus,
+.plain-test-input:focus-visible {
+  outline: 3px solid var(--accent-cyan);
+  border-color: transparent;
+  background: rgba(6, 20, 32, 0.92);
 }
 
 .neural-composer-bar {
@@ -704,7 +659,7 @@ body {
 .neural-writer-input {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 5px 8px;
+  padding: 6px 8px;
   border-radius: 7px;
   border: 1px solid rgba(168, 183, 206, 0.3);
   background: rgba(0, 0, 0, 0.65);
@@ -713,9 +668,11 @@ body {
   touch-action: manipulation;
 }
 
-.neural-writer-input:focus {
-  outline: 2px solid var(--accent-mint);
+.neural-writer-input:focus,
+.neural-writer-input:focus-visible {
+  outline: 3px solid var(--accent-mint);
   border-color: transparent;
+  background: rgba(6, 26, 14, 0.9);
 }
 
 .composer-actions {

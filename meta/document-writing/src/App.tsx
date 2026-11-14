@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DocumentCanvas, LOGICAL_PAGE_WIDTH } from './components/DocumentCanvas';
 import {
-  type ComposerRowKind,
   type InputCapabilityReport,
   NeuralComposer,
 } from './components/NeuralComposer';
@@ -30,86 +29,6 @@ const PEN_COLORS = [
 
 const PEN_WIDTHS = [2.5, 4.5, 7];
 const BLOCK_KINDS: BlockKind[] = ['p', 'h1', 'h2', 'bullet', 'quote'];
-
-const DIAL_CHARS = [
-  ' ',
-  'a',
-  'b',
-  'c',
-  'd',
-  'e',
-  'f',
-  'g',
-  'h',
-  'i',
-  'j',
-  'k',
-  'l',
-  'm',
-  'n',
-  'o',
-  'p',
-  'q',
-  'r',
-  's',
-  't',
-  'u',
-  'v',
-  'w',
-  'x',
-  'y',
-  'z',
-  '.',
-  ',',
-  '?',
-  '⌫',
-] as const;
-
-const COMMON_WORDS = [
-  'the',
-  'and',
-  'for',
-  'that',
-  'this',
-  'with',
-  'from',
-  'have',
-  'will',
-  'what',
-  'note',
-  'meta',
-  'glasses',
-  'neural',
-  'band',
-  'wrist',
-  'document',
-  'write',
-  'draw',
-  'hello',
-  'world',
-  'project',
-  'update',
-  'meeting',
-  'ideas',
-  'summary',
-  'action',
-  'today',
-  'thanks',
-  'please',
-  'quick',
-  'test',
-  'works',
-  'looks',
-  'great',
-];
-
-const COMPOSER_ROWS: readonly ComposerRowKind[] = ['words', 'dial', 'native'];
-
-function getActiveWordPrefix(lineText: string, charIndex: number): string {
-  const before = lineText.slice(0, clamp(charIndex, 0, lineText.length));
-  const match = before.match(/([A-Za-z]+)$/);
-  return match ? match[1] : '';
-}
 
 function describeElement(el: EventTarget | null): string {
   if (!el || !(el instanceof Element)) return 'window';
@@ -259,18 +178,13 @@ export default function App() {
   const [doc, setDoc] = useState<DocumentSnapshot>(loadSavedDocument);
   const [undoStack, setUndoStack] = useState<DocumentSnapshot[]>([]);
   const [mode, setMode] = useState<InteractionMode>('DOCUMENT');
-  const [composerDraft, setComposerDraft] = useState('');
-  const [composerRow, setComposerRow] = useState<ComposerRowKind>('dial');
-  const [dialIndex, setDialIndex] = useState(1);
-  const [wordIndex, setWordIndex] = useState(0);
-  const [uppercaseDial, setUppercaseDial] = useState(false);
   const [showProbe, setShowProbe] = useState(false);
   const [rawEventLog, setRawEventLog] = useState<string[]>([]);
   const [activeElTag, setActiveElTag] = useState<string>(() => describeActiveElement());
   const [penColorIdx, setPenColorIdx] = useState(0);
   const [penWidthIdx, setPenWidthIdx] = useState(1);
   const [simulatorFrame, setSimulatorFrame] = useState(true);
-  const [showEmulatorPanel, setShowEmulatorPanel] = useState(true);
+  const [showEmulatorPanel, setShowEmulatorPanel] = useState(false);
   const [toolbarIndex, setToolbarIndex] = useState(0);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [lastGesture, setLastGesture] = useState<GestureEventRecord | null>(null);
@@ -298,12 +212,6 @@ export default function App() {
   undoStackRef.current = undoStack;
   const modeRef = useRef(mode);
   modeRef.current = mode;
-  const composerDraftRef = useRef(composerDraft);
-  composerDraftRef.current = composerDraft;
-  const composerRowRef = useRef(composerRow);
-  composerRowRef.current = composerRow;
-  const dialIndexRef = useRef(dialIndex);
-  dialIndexRef.current = dialIndex;
   const telemetryStatusRef = useRef(telemetry.status);
   telemetryStatusRef.current = telemetry.status;
   const penPosRef = useRef(penPos);
@@ -317,9 +225,6 @@ export default function App() {
   const holdIntentRef = useRef<'pending' | 'draw' | 'scrub'>('pending');
   const scrubStartColRef = useRef(0);
   const lastGlideTickRef = useRef(0);
-  const dialHoldingRef = useRef(false);
-  const dialStartIdxRef = useRef(1);
-  const lastDialGlideTickRef = useRef(0);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLInputElement | null>(null);
@@ -418,34 +323,6 @@ export default function App() {
         const now = performance.now();
         telemetryStatusRef.current = nextTelemetry.status;
         const activeMode = modeRef.current;
-
-        // 0) Rotary Character Dial scrubbing while holding Tip in COMPOSER mode
-        if (
-          activeMode === 'COMPOSER' &&
-          dialHoldingRef.current &&
-          now - lastDrawTickRef.current >= 33
-        ) {
-          lastDrawTickRef.current = now;
-          const rollDeg = nextTelemetry.rollDeg;
-          const absRoll = Math.abs(rollDeg);
-          const effectiveDeg =
-            absRoll <= 2.0 ? 0 : rollDeg > 0 ? rollDeg - 2.0 : rollDeg + 2.0;
-          const stepOffset = Math.round(effectiveDeg / 3.0);
-          const dialLen = DIAL_CHARS.length;
-
-          if (absRoll > 24 && now - lastDialGlideTickRef.current >= 95) {
-            lastDialGlideTickRef.current = now;
-            dialStartIdxRef.current =
-              (dialStartIdxRef.current + Math.sign(rollDeg) + dialLen) % dialLen;
-          }
-
-          const targetIdx =
-            (((dialStartIdxRef.current + stepOffset) % dialLen) + dialLen) % dialLen;
-          if (targetIdx !== dialIndexRef.current) {
-            dialIndexRef.current = targetIdx;
-            setDialIndex(targetIdx);
-          }
-        }
 
         // 1) 1x Hold: disambiguate arm translation (DRAW_HOLD) vs forearm rotation (CURSOR_SCRUB)
         if (
@@ -588,18 +465,32 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const updateActive = () => setActiveElTag(describeActiveElement());
+    const updateActive = (e?: FocusEvent) => {
+      setActiveElTag(describeActiveElement());
+      if (e?.type === 'focusin') {
+        recordRawInputEvent('focusin', describeElement(e.target));
+      }
+    };
     const onWinKeyDown = (e: KeyboardEvent) => {
       if (e.repeat) return;
       recordRawInputEvent('keydown', `key="${e.key}" target=${describeElement(e.target)}`);
     };
+    const onPlainFieldEvent = (e: Event) => {
+      if (e.target instanceof HTMLInputElement && e.target.id === 'plain-glasses-test-input') {
+        recordRawInputEvent(`plain:${e.type}`, `val="${e.target.value}"`);
+      }
+    };
     window.addEventListener('focusin', updateActive);
     window.addEventListener('focusout', updateActive);
     window.addEventListener('keydown', onWinKeyDown, true);
+    window.addEventListener('input', onPlainFieldEvent, true);
+    window.addEventListener('change', onPlainFieldEvent, true);
     return () => {
       window.removeEventListener('focusin', updateActive);
       window.removeEventListener('focusout', updateActive);
       window.removeEventListener('keydown', onWinKeyDown, true);
+      window.removeEventListener('input', onPlainFieldEvent, true);
+      window.removeEventListener('change', onPlainFieldEvent, true);
     };
   }, [recordRawInputEvent]);
 
@@ -631,12 +522,10 @@ export default function App() {
 
   const commitPendingDraftIfAny = useCallback(() => {
     const el = composerInputRef.current;
-    const raw = (el?.value ?? '') || composerDraftRef.current;
+    const raw = el?.value ?? '';
     if (el) {
       el.value = '';
     }
-    composerDraftRef.current = '';
-    setComposerDraft('');
     if (raw.length > 0) {
       insertTextAtCursor(raw);
       showToast(`Inserted "${raw.slice(0, 20)}${raw.length > 20 ? '…' : ''}"`);
@@ -778,55 +667,6 @@ export default function App() {
     });
   }, [commitDocUpdate, commitPendingDraftIfAny]);
 
-  const insertDialChar = useCallback(
-    (char: string, applyCase = true) => {
-      if (char === '⌫') {
-        backspaceAtCursor();
-        return;
-      }
-      const out =
-        applyCase && uppercaseDial && /^[a-z]$/.test(char) ? char.toUpperCase() : char;
-      insertTextAtCursor(out);
-    },
-    [backspaceAtCursor, insertTextAtCursor, uppercaseDial],
-  );
-
-  const completeWordAtCursor = useCallback(
-    (word: string) => {
-      commitDocUpdate(prev => {
-        const { lineIndex, charIndex } = prev.cursor;
-        const target = prev.blocks[lineIndex];
-        if (!target) return prev;
-        const clampedCol = clamp(charIndex, 0, target.text.length);
-        const prefix = getActiveWordPrefix(target.text, clampedCol);
-        const matchesPrefix =
-          prefix.length > 0 && word.toLowerCase().startsWith(prefix.toLowerCase());
-        const replaceStart = matchesPrefix ? clampedCol - prefix.length : clampedCol;
-        let finalWord = word;
-        if (matchesPrefix && prefix[0] === prefix[0].toUpperCase()) {
-          finalWord = word[0].toUpperCase() + word.slice(1);
-        } else if (uppercaseDial) {
-          finalWord = word[0].toUpperCase() + word.slice(1);
-        }
-        const insertion = `${finalWord} `;
-        const nextText =
-          target.text.slice(0, replaceStart) + insertion + target.text.slice(clampedCol);
-        const blocks = [...prev.blocks];
-        blocks[lineIndex] = { ...target, text: nextText };
-        return {
-          ...prev,
-          blocks,
-          cursor: {
-            lineIndex,
-            charIndex: replaceStart + insertion.length,
-          },
-        };
-      });
-      showToast(`Word "${word}"`);
-    },
-    [commitDocUpdate, showToast, uppercaseDial],
-  );
-
   const handleUndo = useCallback(() => {
     commitPendingDraftIfAny();
     const stack = undoStackRef.current;
@@ -848,15 +688,7 @@ export default function App() {
     (pointerStart?: { x: number; y: number }) => {
       commitPendingDraftIfAny();
       if (modeRef.current === 'COMPOSER') {
-        composerRowRef.current = 'dial';
-        setComposerRow('dial');
         composerInputRef.current?.blur();
-        dialHoldingRef.current = true;
-        dialStartIdxRef.current = dialIndexRef.current;
-        lastDialGlideTickRef.current = 0;
-        sensorRef.current?.captureReference();
-        showToast('Rotate arm ◀▶ to spin character dial');
-        return;
       }
       sensorRef.current?.captureReference();
 
@@ -888,7 +720,7 @@ export default function App() {
       setMode('DRAW_HOLD');
       modeRef.current = 'DRAW_HOLD';
     },
-    [commitPendingDraftIfAny, maxSheetHeight, penColorIdx, penWidthIdx, showToast],
+    [commitPendingDraftIfAny, maxSheetHeight, penColorIdx, penWidthIdx],
   );
 
   const handleHoldMove = useCallback(
@@ -917,20 +749,6 @@ export default function App() {
   );
 
   const finishWristDrawHold = useCallback(() => {
-    if (dialHoldingRef.current) {
-      const moved = dialIndexRef.current !== dialStartIdxRef.current;
-      dialHoldingRef.current = false;
-      sensorRef.current?.clearReference();
-      if (moved) {
-        const chosen = DIAL_CHARS[dialIndexRef.current];
-        if (chosen) {
-          insertDialChar(chosen);
-          logGesture('Dial Rotate Release', `Inserted "${chosen === ' ' ? 'Space' : chosen}"`);
-        }
-      }
-      return;
-    }
-
     const intent = holdIntentRef.current;
     holdIntentRef.current = 'pending';
     const stroke = activeStrokeRef.current;
@@ -952,12 +770,11 @@ export default function App() {
       }));
       showToast(`Ink stroke saved (${stroke.points.length} pts)`);
     }
-  }, [commitDocUpdate, insertDialChar, logGesture, showToast]);
+  }, [commitDocUpdate, showToast]);
 
   const startWristEraseHold = useCallback(
     (pointerStart?: { x: number; y: number }) => {
       commitPendingDraftIfAny();
-      dialHoldingRef.current = false;
       if (modeRef.current === 'COMPOSER') {
         composerInputRef.current?.blur();
       }
@@ -1078,47 +895,6 @@ export default function App() {
   const activeBlock = doc.blocks[doc.cursor.lineIndex];
   const activeStyleIdx = Math.max(0, BLOCK_KINDS.indexOf(activeBlock?.kind ?? 'p'));
 
-  const activeWordPrefix = useMemo(
-    () => getActiveWordPrefix(activeBlock?.text ?? '', doc.cursor.charIndex),
-    [activeBlock?.text, doc.cursor.charIndex],
-  );
-
-  const suggestedWords = useMemo(() => {
-    const prefixLower = activeWordPrefix.toLowerCase();
-    if (!prefixLower) {
-      return COMMON_WORDS.slice(0, 6);
-    }
-    const matches = COMMON_WORDS.filter(
-      w => w.startsWith(prefixLower) && w !== prefixLower,
-    );
-    return (matches.length > 0 ? matches : COMMON_WORDS).slice(0, 6);
-  }, [activeWordPrefix]);
-
-  useEffect(() => {
-    setWordIndex(0);
-  }, [activeWordPrefix]);
-
-  const safeWordIndex =
-    suggestedWords.length > 0 ? clamp(wordIndex, 0, suggestedWords.length - 1) : 0;
-
-  const composerPreview = useMemo(() => {
-    if (mode !== 'COMPOSER') return null;
-    if (composerDraft.length > 0) return composerDraft;
-    if (composerRow === 'words') {
-      const w = suggestedWords[safeWordIndex];
-      return w ? `[${w}]` : null;
-    }
-    if (composerRow === 'dial') {
-      const ch = DIAL_CHARS[dialIndex];
-      if (!ch) return null;
-      if (ch === ' ') return '[␣]';
-      if (ch === '⌫') return '[⌫]';
-      const display = uppercaseDial && /^[a-z]$/.test(ch) ? ch.toUpperCase() : ch;
-      return `[${display}]`;
-    }
-    return null;
-  }, [composerDraft, composerRow, dialIndex, mode, safeWordIndex, suggestedWords, uppercaseDial]);
-
   const capabilityReport: InputCapabilityReport = useMemo(() => {
     const win = window as unknown as Record<string, unknown>;
     const nav = navigator as unknown as Record<string, unknown>;
@@ -1132,47 +908,6 @@ export default function App() {
       lastRawEvents: rawEventLog,
     };
   }, [activeElTag, rawEventLog, telemetry.status]);
-
-  const handleComposerNavigate = useCallback(
-    (dir: 'up' | 'down' | 'left' | 'right') => {
-      if (dir === 'up' || dir === 'down') {
-        const curIdx = COMPOSER_ROWS.indexOf(composerRowRef.current);
-        const nextIdx = clamp(curIdx + (dir === 'down' ? 1 : -1), 0, COMPOSER_ROWS.length - 1);
-        const nextRow = COMPOSER_ROWS[nextIdx];
-        composerRowRef.current = nextRow;
-        setComposerRow(nextRow);
-        if (nextRow === 'native') {
-          composerInputRef.current?.focus();
-          showToast('Native OS Input row focused');
-        } else {
-          composerInputRef.current?.blur();
-        }
-        return;
-      }
-
-      const delta = dir === 'right' ? 1 : -1;
-      if (composerRowRef.current === 'words') {
-        const len = Math.max(1, suggestedWords.length);
-        setWordIndex(idx => (idx + delta + len) % len);
-        return;
-      }
-
-      if (composerRowRef.current === 'native') {
-        if (delta < 0) {
-          handleSwipeLeft();
-        } else {
-          handleSwipeRight();
-        }
-        return;
-      }
-
-      const len = DIAL_CHARS.length;
-      const nextDialIdx = (dialIndexRef.current + delta + len) % len;
-      dialIndexRef.current = nextDialIdx;
-      setDialIndex(nextDialIdx);
-    },
-    [handleSwipeLeft, handleSwipeRight, showToast, suggestedWords.length],
-  );
 
   const toolbarActions = useMemo(
     () => [
@@ -1349,50 +1084,18 @@ export default function App() {
 
   const controls = useWristbandControls({
     mode,
-    isComposerEmpty: composerDraft.length === 0,
     isLiveWristSensor: telemetry.status === 'live',
     onSwipeUp: handleSwipeUp,
     onSwipeDown: handleSwipeDown,
     onSwipeLeft: handleSwipeLeft,
     onSwipeRight: handleSwipeRight,
     onTipSingleTap: () => {
-      if (modeRef.current === 'COMPOSER') {
-        const row = composerRowRef.current;
-        if (row === 'words') {
-          const word = suggestedWords[safeWordIndex];
-          if (word) {
-            completeWordAtCursor(word);
-          }
-        } else if (row === 'dial') {
-          const chosen = DIAL_CHARS[dialIndexRef.current];
-          if (chosen) {
-            insertDialChar(chosen);
-          }
-        } else {
-          const el = composerInputRef.current;
-          el?.focus();
-          el?.click();
-          showToast('Native input focused — use OS Composer or ↑ for Dial');
-        }
-        return;
-      }
       setMode('COMPOSER');
       modeRef.current = 'COMPOSER';
-      if (composerRowRef.current === 'native') {
-        composerInputRef.current?.focus();
-      } else {
-        composerInputRef.current?.blur();
-      }
-      showToast('Write mode — 1x Hold+Rotate or ←→ + 1x Tap');
+      composerInputRef.current?.focus();
+      showToast('Writer input focused — Click / Tip Tap to open glasses composer');
     },
-    onTipDoubleTap: () => {
-      if (modeRef.current === 'COMPOSER') {
-        insertTextAtCursor(' ');
-        showToast('Inserted Space');
-        return;
-      }
-      insertNewLineAtCursor();
-    },
+    onTipDoubleTap: insertNewLineAtCursor,
     onTipTripleTap: () => {
       commitPendingDraftIfAny();
       composerInputRef.current?.blur();
@@ -1411,7 +1114,6 @@ export default function App() {
       }
       if (mode === 'COMPOSER') {
         commitPendingDraftIfAny();
-        dialHoldingRef.current = false;
         setMode('DOCUMENT');
         composerInputRef.current?.blur();
         return;
@@ -1419,7 +1121,6 @@ export default function App() {
       backspaceAtCursor();
     },
     onSideDoubleTap: handleUndo,
-    onComposerNavigate: handleComposerNavigate,
     onToolbarNavigate: dir => {
       const len = toolbarActions.length;
       if (dir === 'left') {
@@ -1491,11 +1192,6 @@ export default function App() {
               }
               return;
             }
-            if (mode === 'COMPOSER') {
-              logGesture('Sim Swipe', `Composer ${dir.toUpperCase()}`);
-              handleComposerNavigate(dir);
-              return;
-            }
             if (dir === 'up') {
               logGesture('Swipe Up', 'Scroll / previous line');
               handleSwipeUp();
@@ -1524,7 +1220,6 @@ export default function App() {
           penPos={penPos}
           penColor={currentColor}
           rollDeg={telemetry.rollDeg}
-          composerPreview={composerPreview}
           mode={mode}
           scrollRef={scrollRef}
           onSelectLine={(lineIndex, charIndex) => {
@@ -1545,38 +1240,10 @@ export default function App() {
 
         <NeuralComposer
           mode={mode}
-          draftText={composerDraft}
           inputRef={composerInputRef}
-          composerRow={composerRow}
-          dialChars={DIAL_CHARS}
-          dialIndex={dialIndex}
-          uppercaseDial={uppercaseDial}
-          suggestedWords={suggestedWords}
-          wordIndex={safeWordIndex}
           capabilityReport={capabilityReport}
           showProbe={showProbe}
           onToggleProbe={() => setShowProbe(v => !v)}
-          onSelectRow={row => {
-            composerRowRef.current = row;
-            setComposerRow(row);
-            if (row === 'native') {
-              composerInputRef.current?.focus();
-            } else {
-              composerInputRef.current?.blur();
-            }
-          }}
-          onSelectWord={idx => setWordIndex(idx)}
-          onCommitWord={word => completeWordAtCursor(word)}
-          onSelectDialIndex={idx => {
-            dialIndexRef.current = idx;
-            setDialIndex(idx);
-          }}
-          onInsertDialChar={char => insertDialChar(char)}
-          onToggleCase={() => setUppercaseDial(v => !v)}
-          onDraftChange={value => {
-            composerDraftRef.current = value;
-            setComposerDraft(value);
-          }}
           onCommitText={text => {
             insertTextAtCursor(text);
             showToast(`Committed "${text.slice(0, 20)}${text.length > 20 ? '…' : ''}"`);
@@ -1586,13 +1253,10 @@ export default function App() {
           onRequestWriteMode={() => {
             setMode('COMPOSER');
             modeRef.current = 'COMPOSER';
-            if (composerRowRef.current === 'native') {
-              composerInputRef.current?.focus();
-            }
+            composerInputRef.current?.focus();
           }}
           onExitComposer={() => {
             commitPendingDraftIfAny();
-            dialHoldingRef.current = false;
             setMode('DOCUMENT');
             modeRef.current = 'DOCUMENT';
             composerInputRef.current?.blur();
@@ -1603,6 +1267,15 @@ export default function App() {
             setMode(curr => (curr === 'TOOLBAR' ? 'DOCUMENT' : 'TOOLBAR'));
           }}
           onRecordRawInputEvent={recordRawInputEvent}
+          onInputFocusChange={focused => {
+            if (focused) {
+              setMode('COMPOSER');
+              modeRef.current = 'COMPOSER';
+            } else if (modeRef.current === 'COMPOSER') {
+              setMode('DOCUMENT');
+              modeRef.current = 'DOCUMENT';
+            }
+          }}
         />
 
         <section className="toolbar-zone" aria-label="Word formatting and drawing toolbar">
@@ -1634,6 +1307,7 @@ export default function App() {
                   toolbarBtnRefs.current[idx] = el;
                 }}
                 type="button"
+                tabIndex={mode === 'TOOLBAR' ? 0 : -1}
                 className={`toolbar-pill ${mode === 'TOOLBAR' && toolbarIndex === idx ? 'is-selected' : ''
                   }`}
                 onClick={() => {
@@ -1664,15 +1338,13 @@ export default function App() {
             </>
           ) : mode === 'COMPOSER' ? (
             <>
-              <span>↑↓ Words/Dial/Native</span>
-              <span>←→ / 1xHold+Rotate Pick</span>
-              <span>1x Tip Insert</span>
-              <span>2x Tip Space</span>
-              <span>Side / Esc Done</span>
+              <span>Tip Click Open OS Composer</span>
+              <span>↑↓ Move Between Fields</span>
+              <span>Side / Done Return</span>
             </>
           ) : (
             <>
-              <span>↑↓ Scroll</span>
+              <span>↑↓ Focus / Scroll</span>
               <span>←→ / Hold+Rotate Cursor</span>
               <span>1x Hold Draw</span>
               <span>2x Hold Erase</span>

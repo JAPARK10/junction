@@ -1,6 +1,7 @@
 // Espoo TalentPulse AI — Hiring Radar, Event Strategist & Anti-Bluff Gatekeeper
 
-const DEFAULT_GEMINI_API_KEY = ''; // <-- Paste your Gemini API key ('AIzaSy...') here OR via the top-right UI button
+let envGeminiApiKey = (typeof window !== 'undefined' && window.__ENV_GEMINI_API_KEY__) ? window.__ENV_GEMINI_API_KEY__ : '';
+let envGeminiModel = (typeof window !== 'undefined' && window.__ENV_GEMINI_MODEL__) ? window.__ENV_GEMINI_MODEL__ : '';
 const STORAGE_KEY_API = 'espoo_gemini_api_key';
 const STORAGE_KEY_MODEL = 'espoo_gemini_model';
 const STORAGE_KEY_EXPORT_EVENT = 'espoo_exported_event';
@@ -242,9 +243,10 @@ let hiringChart = null;
 
 // ==================== INITIALIZATION ====================
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   lucide.createIcons();
   initTabs();
+  await loadEnvFile();
   initApiConfigModal();
   initRadarControls();
   initEventArchitect();
@@ -281,12 +283,39 @@ function initTabs() {
 
 // ==================== GEMINI API CLIENT & CONFIG ====================
 
+async function loadEnvFile() {
+  for (const path of ['./.env', '../.env']) {
+    try {
+      const res = await fetch(path, { cache: 'no-store' });
+      if (!res.ok) continue;
+      const text = await res.text();
+      for (const rawLine of text.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith('#')) continue;
+        const eqIdx = line.indexOf('=');
+        if (eqIdx === -1) continue;
+        const k = line.slice(0, eqIdx).trim();
+        const v = line.slice(eqIdx + 1).trim().replace(/^['"]|['"]$/g, '');
+        if (k === 'GEMINI_API_KEY' && v && !v.includes('your_gemini_api_key')) {
+          envGeminiApiKey = v;
+        }
+        if (k === 'GEMINI_MODEL' && v) {
+          envGeminiModel = v;
+        }
+      }
+      if (envGeminiApiKey) break;
+    } catch (_) {
+      // Ignore fetch errors when opened directly via file:// (env.local.js handles file://)
+    }
+  }
+}
+
 function getApiKey() {
-  return localStorage.getItem(STORAGE_KEY_API) || DEFAULT_GEMINI_API_KEY || '';
+  return localStorage.getItem(STORAGE_KEY_API) || envGeminiApiKey || '';
 }
 
 function getSelectedModel() {
-  return localStorage.getItem(STORAGE_KEY_MODEL) || 'gemini-2.5-flash';
+  return localStorage.getItem(STORAGE_KEY_MODEL) || envGeminiModel || 'gemini-2.5-flash';
 }
 
 function updateApiBadgeUI() {

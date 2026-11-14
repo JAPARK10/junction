@@ -3,7 +3,6 @@ import type { InteractionMode } from '../types/document';
 
 export interface WristbandControlHandlers {
   mode: InteractionMode;
-  isComposerEmpty: boolean;
   isLiveWristSensor: boolean;
   onSwipeUp: () => void;
   onSwipeDown: () => void;
@@ -20,7 +19,6 @@ export interface WristbandControlHandlers {
   onTipDoubleHoldEnd: () => void;
   onSideSingleTap: () => void;
   onSideDoubleTap: () => void;
-  onComposerNavigate: (direction: 'up' | 'down' | 'left' | 'right') => void;
   onToolbarNavigate: (direction: 'up' | 'down' | 'left' | 'right') => void;
   onToolbarActivate: () => void;
   onGestureLog: (label: string, detail: string) => void;
@@ -304,7 +302,17 @@ export function useWristbandControls(handlers: WristbandControlHandlers) {
   }, [flushSideTaps]);
 
   useEffect(() => {
+    const isTextElement = (el: EventTarget | null): boolean =>
+      el instanceof HTMLElement &&
+      (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+
     const onKeyDown = (event: KeyboardEvent) => {
+      // Never intercept keys when an INPUT / TEXTAREA / contenteditable is targeted or focused
+      // so Meta Ray-Ban Display spatial navigation and System Composer Enter activation run natively.
+      if (isTextElement(event.target) || isTextElement(document.activeElement)) {
+        return;
+      }
+
       const h = handlersRef.current;
 
       // Global Ctrl+Z / Cmd+Z undo for drawing strokes, erasures & text edits
@@ -313,57 +321,6 @@ export function useWristbandControls(handlers: WristbandControlHandlers) {
         if (!event.repeat) {
           h.onGestureLog('Ctrl+Z', 'Undo last stroke / edit');
           h.onSideDoubleTap();
-        }
-        return;
-      }
-
-      const target = event.target as HTMLElement | null;
-      const isTextField =
-        target !== null &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.isContentEditable);
-
-      // Inside Neural Composer text field:
-      // - Escape exits back to DOCUMENT mode.
-      // - When empty, arrows navigate the document cursor and unmodified Enter is NOT
-      //   preventDefault()ed so activating the focused field opens Meta's Neural Writing composer,
-      //   while still tracking tip press timing for 1x hold / 2x hold eraser / 3x tap toolbar.
-      if (h.mode === 'COMPOSER' || isTextField) {
-        if (event.key === 'Escape') {
-          event.preventDefault();
-          if (!event.repeat) {
-            triggerSideTap();
-          }
-          return;
-        }
-        if (h.isComposerEmpty) {
-          if (event.key === 'Enter') {
-            if (!isTextField) {
-              event.preventDefault();
-            }
-            if (!event.repeat) {
-              beginTipPress('key');
-            }
-            return;
-          }
-          if (event.key === 'ArrowUp') {
-            event.preventDefault();
-            h.onGestureLog('Swipe Up', 'Writer row up');
-            h.onComposerNavigate('up');
-          } else if (event.key === 'ArrowDown') {
-            event.preventDefault();
-            h.onGestureLog('Swipe Down', 'Writer row down');
-            h.onComposerNavigate('down');
-          } else if (event.key === 'ArrowLeft') {
-            event.preventDefault();
-            h.onGestureLog('Swipe Left', 'Writer previous choice');
-            h.onComposerNavigate('left');
-          } else if (event.key === 'ArrowRight') {
-            event.preventDefault();
-            h.onGestureLog('Swipe Right', 'Writer next choice');
-            h.onComposerNavigate('right');
-          }
         }
         return;
       }
@@ -401,13 +358,13 @@ export function useWristbandControls(handlers: WristbandControlHandlers) {
       }
 
       // DOCUMENT, DRAW_HOLD, ERASE_HOLD & CURSOR_SCRUB modes:
+      // Leave ArrowUp/ArrowDown un-prevented so Chromium spatial navigation can move
+      // focus smoothly between #document-sheet, #plain-glasses-test-input, and #neural-writer-input.
       if (event.key === 'ArrowUp') {
-        event.preventDefault();
-        h.onGestureLog('Swipe Up', 'Scroll / previous line');
+        h.onGestureLog('Swipe Up', 'Spatial focus / scroll up');
         h.onSwipeUp();
       } else if (event.key === 'ArrowDown') {
-        event.preventDefault();
-        h.onGestureLog('Swipe Down', 'Scroll / next line');
+        h.onGestureLog('Swipe Down', 'Spatial focus / scroll down');
         h.onSwipeDown();
       } else if (event.key === 'ArrowLeft') {
         event.preventDefault();
@@ -431,20 +388,10 @@ export function useWristbandControls(handlers: WristbandControlHandlers) {
     };
 
     const onKeyUp = (event: KeyboardEvent) => {
-      const h = handlersRef.current;
-      const target = event.target as HTMLElement | null;
-      const isTextField =
-        target !== null &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.isContentEditable);
-
-      if (h.mode === 'COMPOSER' || isTextField) {
-        if (event.key === 'Enter' && h.isComposerEmpty) {
-          endTipPress('key');
-        }
+      if (isTextElement(event.target) || isTextElement(document.activeElement)) {
         return;
       }
+      const h = handlersRef.current;
       if (event.key === 'Enter' || (h.mode === 'TOOLBAR' && event.key === ' ')) {
         event.preventDefault();
         endTipPress('key');

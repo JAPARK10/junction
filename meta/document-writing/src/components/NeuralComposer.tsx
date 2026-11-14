@@ -1,8 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import type { InteractionMode } from '../types/document';
 
-export type ComposerRowKind = 'words' | 'dial' | 'native';
-
 export interface InputCapabilityReport {
   emgWristStatus: string;
   activeElementTag: string;
@@ -15,24 +13,10 @@ export interface InputCapabilityReport {
 
 interface NeuralComposerProps {
   mode: InteractionMode;
-  draftText: string;
   inputRef: React.RefObject<HTMLInputElement | null>;
-  composerRow: ComposerRowKind;
-  dialChars: readonly string[];
-  dialIndex: number;
-  uppercaseDial: boolean;
-  suggestedWords: string[];
-  wordIndex: number;
   capabilityReport: InputCapabilityReport;
   showProbe: boolean;
   onToggleProbe: () => void;
-  onSelectRow: (row: ComposerRowKind) => void;
-  onSelectWord: (index: number) => void;
-  onCommitWord: (word: string) => void;
-  onSelectDialIndex: (index: number) => void;
-  onInsertDialChar: (char: string) => void;
-  onToggleCase: () => void;
-  onDraftChange: (value: string) => void;
   onCommitText: (text: string) => void;
   onBackspace: () => void;
   onUndo: () => void;
@@ -40,37 +24,15 @@ interface NeuralComposerProps {
   onExitComposer: () => void;
   onOpenToolbar: () => void;
   onRecordRawInputEvent: (eventName: string, detail: string) => void;
-}
-
-function formatDialCharLabel(char: string, uppercase: boolean): string {
-  if (char === ' ') return '␣';
-  if (char === '⌫') return '⌫';
-  if (uppercase && /^[a-z]$/.test(char)) {
-    return char.toUpperCase();
-  }
-  return char;
+  onInputFocusChange?: (focused: boolean) => void;
 }
 
 export const NeuralComposer: React.FC<NeuralComposerProps> = ({
   mode,
-  draftText,
   inputRef,
-  composerRow,
-  dialChars,
-  dialIndex,
-  uppercaseDial,
-  suggestedWords,
-  wordIndex,
   capabilityReport,
   showProbe,
   onToggleProbe,
-  onSelectRow,
-  onSelectWord,
-  onCommitWord,
-  onSelectDialIndex,
-  onInsertDialChar,
-  onToggleCase,
-  onDraftChange,
   onCommitText,
   onBackspace,
   onUndo,
@@ -78,26 +40,14 @@ export const NeuralComposer: React.FC<NeuralComposerProps> = ({
   onExitComposer,
   onOpenToolbar,
   onRecordRawInputEvent,
+  onInputFocusChange,
 }) => {
   const isComposingRef = useRef(false);
-  const dialButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const isComposerMode = mode === 'COMPOSER';
 
-  // Keep active dial character scrolled into center view
-  useEffect(() => {
-    if (!isComposerMode) return;
-    const btn = dialButtonRefs.current[dialIndex];
-    if (btn && typeof btn.scrollIntoView === 'function') {
-      btn.scrollIntoView({
-        block: 'nearest',
-        inline: 'center',
-        behavior: 'smooth',
-      });
-    }
-  }, [dialIndex, isComposerMode, composerRow]);
-
   // Attach native DOM listeners on #neural-writer-input so Meta System Composer
-  // change / beforeinput / compositionend / input events are always captured & probed.
+  // input / change / beforeinput / compositionend events are captured without
+  // making the <input> React-controlled.
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
@@ -121,9 +71,9 @@ export const NeuralComposer: React.FC<NeuralComposerProps> = ({
     const handleNativeChange = () => {
       onRecordRawInputEvent('change', `val="${el.value}"`);
       if (!isComposingRef.current && el.value.length > 0) {
-        onCommitText(el.value);
+        const committed = el.value;
         el.value = '';
-        onDraftChange('');
+        onCommitText(committed);
       }
     };
 
@@ -141,12 +91,32 @@ export const NeuralComposer: React.FC<NeuralComposerProps> = ({
       onRecordRawInputEvent('compositionend', `data="${event.data}" val="${el.value}"`);
     };
 
+    const handleNativeKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Enter' && !isComposingRef.current && el.value.length > 0) {
+        event.preventDefault();
+        const committed = el.value;
+        el.value = '';
+        onCommitText(committed);
+      }
+    };
+
+    const handleFocus = () => {
+      onInputFocusChange?.(true);
+    };
+
+    const handleBlur = () => {
+      onInputFocusChange?.(false);
+    };
+
     el.addEventListener('beforeinput', handleBeforeInput);
     el.addEventListener('input', handleNativeInput);
     el.addEventListener('change', handleNativeChange);
     el.addEventListener('compositionstart', handleCompStart);
     el.addEventListener('compositionupdate', handleCompUpdate);
     el.addEventListener('compositionend', handleCompEnd);
+    el.addEventListener('keydown', handleNativeKeyDown);
+    el.addEventListener('focus', handleFocus);
+    el.addEventListener('blur', handleBlur);
 
     return () => {
       el.removeEventListener('beforeinput', handleBeforeInput);
@@ -155,31 +125,18 @@ export const NeuralComposer: React.FC<NeuralComposerProps> = ({
       el.removeEventListener('compositionstart', handleCompStart);
       el.removeEventListener('compositionupdate', handleCompUpdate);
       el.removeEventListener('compositionend', handleCompEnd);
+      el.removeEventListener('keydown', handleNativeKeyDown);
+      el.removeEventListener('focus', handleFocus);
+      el.removeEventListener('blur', handleBlur);
     };
-  }, [inputRef, onCommitText, onDraftChange, onRecordRawInputEvent]);
-
-  const handleReactChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    onDraftChange(e.target.value);
-  };
-
-  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !isComposingRef.current) {
-      if (draftText.length > 0) {
-        e.preventDefault();
-        const committed = draftText;
-        e.currentTarget.value = '';
-        onCommitText(committed);
-        onDraftChange('');
-      }
-    }
-  };
+  }, [inputRef, onCommitText, onInputFocusChange, onRecordRawInputEvent]);
 
   const latestRaw = capabilityReport.lastRawEvents[0] ?? 'none yet';
 
   return (
     <section
       className="composer-region"
-      aria-label="Wristband Writing Controls and Input Probe"
+      aria-label="Glasses Native Text Fields and Input Capability Probe"
     >
       {/* Capability & Raw Event Probe */}
       <div className="capability-probe-strip">
@@ -236,112 +193,26 @@ export const NeuralComposer: React.FC<NeuralComposerProps> = ({
         )}
       </div>
 
-      {/* Rotary Character Dial & Smart Word Completion Dock */}
-      {isComposerMode && (
-        <div className="wrist-writer-dock" aria-label="Wristband Rotary Dial and Word Bar">
-          <div
-            className={`writer-words-row ${composerRow === 'words' ? 'is-active-row' : ''}`}
-            onClick={() => onSelectRow('words')}
-          >
-            <span className="writer-row-tag">Words</span>
-            <div className="writer-words-list">
-              {suggestedWords.map((word, idx) => (
-                <button
-                  key={`${word}-${idx}`}
-                  type="button"
-                  tabIndex={-1}
-                  className={`writer-chip ${composerRow === 'words' && idx === wordIndex ? 'is-selected' : ''}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSelectRow('words');
-                    onSelectWord(idx);
-                    onCommitWord(word);
-                  }}
-                >
-                  {word}
-                </button>
-              ))}
-            </div>
-          </div>
+      {/* 1) Separate Vanilla Uncontrolled Plain Test Field for Glasses Spatial Selection */}
+      <div className="plain-test-bar">
+        <span className="plain-test-label">TEST</span>
+        <input
+          id="plain-glasses-test-input"
+          type="text"
+          className="plain-test-input"
+          placeholder="1) Plain Test Text Field — scroll here & click to test glasses input"
+        />
+      </div>
 
-          <div
-            className={`writer-dial-ribbon ${composerRow === 'dial' ? 'is-active-row' : ''}`}
-            onClick={() => onSelectRow('dial')}
-          >
-            <button
-              type="button"
-              tabIndex={-1}
-              className={`writer-case-btn ${uppercaseDial ? 'is-upper' : ''}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleCase();
-              }}
-              title="Toggle UPPERCASE / lowercase dial"
-            >
-              {uppercaseDial ? 'ABC' : 'abc'}
-            </button>
-            <div className="writer-dial-scroll" role="listbox" aria-label="Character dial">
-              {dialChars.map((char, idx) => {
-                const label = formatDialCharLabel(char, uppercaseDial);
-                const isSelected = idx === dialIndex;
-                return (
-                  <button
-                    key={`${char}-${idx}`}
-                    ref={(el) => {
-                      dialButtonRefs.current[idx] = el;
-                    }}
-                    type="button"
-                    tabIndex={-1}
-                    role="option"
-                    aria-selected={isSelected}
-                    className={`dial-char-btn ${composerRow === 'dial' && isSelected ? 'is-selected' : ''} ${char === '⌫' ? 'is-danger' : ''}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSelectRow('dial');
-                      onSelectDialIndex(idx);
-                      onInsertDialChar(char);
-                    }}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Primary OS Composer Input & Actions */}
-      <div
-        className={`neural-composer-bar ${isComposerMode && composerRow === 'native' ? 'is-native-row' : ''}`}
-        onClick={() => {
-          if (isComposerMode) {
-            onSelectRow('native');
-          }
-        }}
-      >
+      {/* 2) Document Writer Native Text Field & Actions */}
+      <div className={`neural-composer-bar ${isComposerMode ? 'is-native-row' : ''}`}>
         <input
           id="neural-writer-input"
           ref={inputRef}
           type="text"
           className="neural-writer-input"
-          value={draftText}
-          onChange={handleReactChange}
-          onKeyDown={handleInputKeyDown}
-          onFocus={() => {
-            onRecordRawInputEvent('focusin', 'neural-writer-input');
-          }}
-          placeholder={
-            isComposerMode
-              ? composerRow === 'native'
-                ? 'Native input active — tap to open OS Neural Composer / type…'
-                : 'Dial active (1x Hold+Rotate / ←→, 1x tap=ins, 2x=space) · ↓ Native'
-              : 'Tap once or click Write for Wristband Dial & OS Composer…'
-          }
-          aria-label="Neural writing input"
-          autoComplete="off"
-          autoCorrect="on"
-          spellCheck
+          placeholder="2) Write into Document at Cursor — scroll here & click"
+          aria-label="Write into document at cursor"
         />
 
         <div className="composer-actions">

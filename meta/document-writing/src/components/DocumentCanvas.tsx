@@ -238,7 +238,9 @@ export function DocumentCanvas({
       aria-label="Word document workspace"
     >
       <div
+        id="document-sheet"
         ref={pageSheetRef}
+        tabIndex={0}
         className="doc-page-sheet"
         style={{ minHeight: `${sheetHeightPx}px` }}
         onPointerDown={handlePointerDown}

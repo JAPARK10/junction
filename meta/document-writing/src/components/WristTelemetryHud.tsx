@@ -134,10 +134,20 @@ export function WristTelemetryHud({
           {lastGesture ? `${lastGesture.label}: ${lastGesture.detail}` : 'Ready for wristband'}
         </span>
         <div className="hud-actions">
-          <button type="button" className="hud-mini-btn" onClick={onToggleSimulatorFrame}>
+          <button
+            type="button"
+            tabIndex={-1}
+            className="hud-mini-btn"
+            onClick={onToggleSimulatorFrame}
+          >
             {simulatorFrame ? 'Full' : '600×600'}
           </button>
-          <button type="button" className="hud-mini-btn" onClick={onToggleEmulatorPanel}>
+          <button
+            type="button"
+            tabIndex={-1}
+            className="hud-mini-btn"
+            onClick={onToggleEmulatorPanel}
+          >
             {showEmulatorPanel ? 'Hide Band Sim' : 'Band Sim'}
           </button>
         </div>
@@ -169,21 +179,21 @@ export function WristTelemetryHud({
             <div className="sim-cluster">
               <span className="sim-cluster-title">Swipes (4-Way)</span>
               <div className="sim-btn-group">
-                <button type="button" onClick={() => onSimSwipe('up')}>↑ Up</button>
-                <button type="button" onClick={() => onSimSwipe('down')}>↓ Down</button>
-                <button type="button" onClick={() => onSimSwipe('left')}>← Left</button>
-                <button type="button" onClick={() => onSimSwipe('right')}>→ Right</button>
+                <button type="button" tabIndex={-1} onClick={() => onSimSwipe('up')}>↑ Up</button>
+                <button type="button" tabIndex={-1} onClick={() => onSimSwipe('down')}>↓ Down</button>
+                <button type="button" tabIndex={-1} onClick={() => onSimSwipe('left')}>← Left</button>
+                <button type="button" tabIndex={-1} onClick={() => onSimSwipe('right')}>→ Right</button>
               </div>
             </div>
 
             <div className="sim-cluster">
               <span className="sim-cluster-title">Index Tip &amp; Side Taps</span>
               <div className="sim-btn-group">
-                <button type="button" onClick={() => onSimTipTap(1)}>Tip 1x</button>
-                <button type="button" onClick={() => onSimTipTap(2)}>Tip 2x</button>
-                <button type="button" onClick={() => onSimTipTap(3)}>Tip 3x</button>
-                <button type="button" onClick={() => onSimSideTap(1)}>Side 1x</button>
-                <button type="button" onClick={() => onSimSideTap(2)}>Side 2x</button>
+                <button type="button" tabIndex={-1} onClick={() => onSimTipTap(1)}>Tip 1x</button>
+                <button type="button" tabIndex={-1} onClick={() => onSimTipTap(2)}>Tip 2x</button>
+                <button type="button" tabIndex={-1} onClick={() => onSimTipTap(3)}>Tip 3x</button>
+                <button type="button" tabIndex={-1} onClick={() => onSimSideTap(1)}>Side 1x</button>
+                <button type="button" tabIndex={-1} onClick={() => onSimSideTap(2)}>Side 2x</button>
               </div>
             </div>
 
@@ -192,6 +202,7 @@ export function WristTelemetryHud({
               <div className="sim-btn-group">
                 <button
                   type="button"
+                  tabIndex={-1}
                   className={simHoldingDraw ? 'is-active-hold' : ''}
                   onPointerDown={() => {
                     setSimHoldingDraw(true);
@@ -214,6 +225,7 @@ export function WristTelemetryHud({
                 </button>
                 <button
                   type="button"
+                  tabIndex={-1}
                   className={simHoldingErase ? 'is-active-erase-hold' : ''}
                   onPointerDown={() => {
                     setSimHoldingErase(true);
@@ -234,7 +246,7 @@ export function WristTelemetryHud({
                 >
                   {simHoldingErase ? 'Erasing… Move Sliders' : '2x Hold Eraser'}
                 </button>
-                <button type="button" onClick={runWristCircleDemo}>
+                <button type="button" tabIndex={-1} onClick={runWristCircleDemo}>
                   Demo Wrist Loop
                 </button>
               </div>
@@ -246,6 +258,7 @@ export function WristTelemetryHud({
               Arm Yaw ({yawDeg}°)
               <input
                 type="range"
+                tabIndex={-1}
                 min={-35}
                 max={35}
                 value={yawDeg}
@@ -256,6 +269,7 @@ export function WristTelemetryHud({
               Arm Pitch ({pitchDeg}°)
               <input
                 type="range"
+                tabIndex={-1}
                 min={-30}
                 max={30}
                 value={pitchDeg}
@@ -266,6 +280,7 @@ export function WristTelemetryHud({
               Wrist Roll ({rollDeg}°)
               <input
                 type="range"
+                tabIndex={-1}
                 min={-60}
                 max={60}
                 value={rollDeg}
