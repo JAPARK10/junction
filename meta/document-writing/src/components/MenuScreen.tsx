@@ -13,21 +13,62 @@ const CARD_THUMB_W = 104;
 const CARD_THUMB_H = Math.round((CARD_THUMB_W * A4_HEIGHT) / A4_WIDTH);
 
 interface MenuScreenProps {
-  screen: 'MENU' | 'SETTINGS';
+  screen: 'MENU' | 'SETTINGS' | 'MANUAL';
   docs: A4Document[];
   settings: AppSettings;
-  menuFocusArea: 'CARDS' | 'GEAR';
+  menuFocusArea: 'CARDS' | 'MANUAL' | 'GEAR';
   menuSelectedIndex: number;
   cardOptionsDocId: string | null;
   cardOptionIndex: 0 | 1; // 0 = Pin, 1 = Delete
   deleteConfirmDocId: string | null;
   deleteConfirmYes: boolean;
   settingsRowIndex: 0 | 1;
+  manualSectionIndex: number;
   onCloseCardOptions: () => void;
+  onOpenManual: () => void;
+  onOpenSettings: () => void;
   onSetThemeMode: (mode: ThemeMode) => void;
   onSetWristMappingMode: (mode: WristMappingMode) => void;
   onBackFromSettings: () => void;
+  onBackFromManual: () => void;
 }
+
+const MANUAL_SECTIONS: ReadonlyArray<{ title: string; items: ReadonlyArray<[string, string]> }> = [
+  {
+    title: '1. Explorer Menu, Photo Repo & Cards',
+    items: [
+      ['Swipe Left / Right / Up / Down', 'Move across A4 documents and synced account photos.'],
+      ['Swipe Up (top row)', 'Focus top-right Manual (📖) and Settings (⚙️) icons; Swipe Left/Right to switch.'],
+      ['1x Index Tap', 'Open document/photo, create sheet on + New Document, or open Manual / Settings.'],
+      ['1x Index Hold (on card)', 'Open Pin / Unpin and Delete actions (Middle Finger closes).'],
+    ],
+  },
+  {
+    title: '2. Mode Switching, Zoom & Pan',
+    items: [
+      ['2x Tap Hold + Rotate Left / Right (at 1.0x)', 'Hover between Drawing Mode and Writing Mode in bottom bar; 1x Tap confirms, Middle Finger cancels.'],
+      ['2x Tap Hold + Move Up / Down', 'Exclusively Zoom In / Out (1.0x full A4 sheet up to 3.5x).'],
+      ['2x Tap Hold + Move Left / Right or 3rd Axis', 'Exclusively Drag / Pan when zoomed (> 1.0x). Zoom and Drag never happen together.'],
+    ],
+  },
+  {
+    title: '3. Drawing Mode (A4 & Photo Backgrounds)',
+    items: [
+      ['Move Wrist (No Hold)', 'Aim live crosshair anywhere on paper or photo; 2x Index Tap re-centers pen.'],
+      ['1x Index Hold + Move Wrist', 'Draw with active brush (Pen, Brush, Spray, Fill), drag Shape, or erase with Eraser.'],
+      ['Swipe Left / Right + 1x Tap', 'Browse Drawing Toolbar (Line thickness, Color, Brush type, Add Shape, Fill color).'],
+    ],
+  },
+  {
+    title: '4. Writing Mode & Global Shortcuts',
+    items: [
+      ['Swipe Up / Down', 'Move cursor across text lines on the document or photo.'],
+      ['1x Index Hold + Rotate Left / Right', 'Scrub text caret character-by-character along the current line.'],
+      ['Swipe Left / Right + 1x Tap', 'Browse Writing Toolbar (Text Style, Formatting, Size, Bullet Points, Glasses Input).'],
+      ['3x Index Tap / Middle Finger', '3x Tap = Undo last edit or stroke. Middle Finger = Step back / Save & return to Menu.'],
+    ],
+  },
+];
 
 export const MenuScreen: React.FC<MenuScreenProps> = React.memo(({
   screen,
@@ -40,12 +81,17 @@ export const MenuScreen: React.FC<MenuScreenProps> = React.memo(({
   deleteConfirmDocId,
   deleteConfirmYes,
   settingsRowIndex,
+  manualSectionIndex,
   onCloseCardOptions,
+  onOpenManual,
+  onOpenSettings,
   onSetThemeMode,
   onSetWristMappingMode,
   onBackFromSettings,
+  onBackFromManual,
 }) => {
   const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const manualRefs = useRef<Array<HTMLDivElement | null>>([]);
 
   useEffect(() => {
     if (screen !== 'MENU' || menuFocusArea !== 'CARDS') return;
@@ -54,6 +100,53 @@ export const MenuScreen: React.FC<MenuScreenProps> = React.memo(({
       el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
     }
   }, [menuFocusArea, menuSelectedIndex, screen]);
+
+  useEffect(() => {
+    if (screen !== 'MANUAL') return;
+    const el = manualRefs.current[manualSectionIndex];
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+    }
+  }, [manualSectionIndex, screen]);
+
+  if (screen === 'MANUAL') {
+    return (
+      <section className="settings-screen manual-screen" aria-label="AirCraft Controls Manual">
+        <div className="settings-header">
+          <h2 className="settings-title">📖 AirCraft Controls Manual</h2>
+          <button
+            type="button"
+            tabIndex={-1}
+            className="settings-back-btn"
+            onClick={onBackFromManual}
+          >
+            ← Back to Menu (Middle Finger)
+          </button>
+        </div>
+
+        <div className="settings-list">
+          {MANUAL_SECTIONS.map((section, idx) => (
+            <div
+              key={section.title}
+              ref={el => {
+                manualRefs.current[idx] = el;
+              }}
+              className={`settings-card ${manualSectionIndex === idx ? 'is-focused' : ''}`}
+            >
+              <div className="settings-row-title">{section.title}</div>
+              <ul className="manual-bullet-list">
+                {section.items.map(([control, desc]) => (
+                  <li key={control}>
+                    <strong>{control}:</strong> {desc}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </section>
+    );
+  }
 
   if (screen === 'SETTINGS') {
     return (
@@ -139,15 +232,28 @@ export const MenuScreen: React.FC<MenuScreenProps> = React.memo(({
         <div className="menu-title-group">
           <h1 className="menu-heading">Documents ({docs.length})</h1>
         </div>
-        <button
-          type="button"
-          tabIndex={-1}
-          className={`menu-gear-btn ${menuFocusArea === 'GEAR' ? 'is-focused' : ''}`}
-          title="Settings (Swipe Up from cards)"
-          aria-label="Open Settings"
-        >
-          ⚙️
-        </button>
+        <div className="menu-topbar-actions">
+          <button
+            type="button"
+            tabIndex={-1}
+            className={`menu-gear-btn ${menuFocusArea === 'MANUAL' ? 'is-focused' : ''}`}
+            onClick={onOpenManual}
+            title="Controls Manual (Swipe Up from cards)"
+            aria-label="Open Controls Manual"
+          >
+            📖
+          </button>
+          <button
+            type="button"
+            tabIndex={-1}
+            className={`menu-gear-btn ${menuFocusArea === 'GEAR' ? 'is-focused' : ''}`}
+            onClick={onOpenSettings}
+            title="Settings (Swipe Up from cards)"
+            aria-label="Open Settings"
+          >
+            ⚙️
+          </button>
+        </div>
       </div>
 
       <div className="explorer-cards-strip" role="listbox" aria-label="A4 Documents">

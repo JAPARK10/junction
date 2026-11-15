@@ -324,6 +324,12 @@ body {
   color: #ffffff;
 }
 
+.menu-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .menu-gear-btn {
   width: 36px;
   height: 34px;
@@ -341,6 +347,21 @@ body {
   border-color: #ffffff;
   background: rgba(255, 255, 255, 0.18);
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.45);
+}
+
+.manual-bullet-list {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 1.38;
+  color: var(--text-secondary);
+}
+
+.manual-bullet-list strong {
+  color: #ffffff;
 }
 
 .explorer-cards-strip {

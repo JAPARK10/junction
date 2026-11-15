@@ -1,7 +1,7 @@
 export const A4_WIDTH = 560;
 export const A4_HEIGHT = 792;
 
-export type AppScreen = 'MENU' | 'SETTINGS' | 'DOCUMENT';
+export type AppScreen = 'MENU' | 'SETTINGS' | 'MANUAL' | 'DOCUMENT';
 export type ThemeMode = 'transparent' | 'light';
 export type WristMappingMode = 'stretched-arm' | 'horizontal-surface';
 export type DocInteractionMode = 'DRAW' | 'WRITE';

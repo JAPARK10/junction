@@ -431,13 +431,14 @@ export function App() {
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
 
   // Explorer Menu & Settings state
-  const [menuFocusArea, setMenuFocusArea] = useState<'CARDS' | 'GEAR'>('CARDS');
+  const [menuFocusArea, setMenuFocusArea] = useState<'CARDS' | 'MANUAL' | 'GEAR'>('CARDS');
   const [menuSelectedIndex, setMenuSelectedIndex] = useState(0);
   const [cardOptionsDocId, setCardOptionsDocId] = useState<string | null>(null);
   const [cardOptionIndex, setCardOptionIndex] = useState<0 | 1>(0);
   const [deleteConfirmDocId, setDeleteConfirmDocId] = useState<string | null>(null);
   const [deleteConfirmYes, setDeleteConfirmYes] = useState(false);
   const [settingsRowIndex, setSettingsRowIndex] = useState<0 | 1>(0);
+  const [manualSectionIndex, setManualSectionIndex] = useState(0);
 
   // Document View mode & viewport state
   const [docMode, setDocMode] = useState<DocInteractionMode>('DRAW');
@@ -902,7 +903,7 @@ export function App() {
         if (activeHoldRef.current === 'view-zoom') {
           const lockDy = holdLockOffsetRef.current?.dy ?? 0;
           const effDyPx = (dy - lockDy) * POINTER_SCALE;
-          const zoomDelta = (-effDyPx) / 135;
+          const zoomDelta = effDyPx / 135;
           const nextZoom = Math.max(
             MIN_ZOOM,
             Math.min(MAX_ZOOM, zoomOriginRef.current + zoomDelta),
@@ -1148,13 +1149,13 @@ export function App() {
         showToast('Closed options');
         return;
       }
-      if (menuFocusArea === 'GEAR') {
+      if (menuFocusArea === 'GEAR' || menuFocusArea === 'MANUAL') {
         setMenuFocusArea('CARDS');
       }
       return;
     }
 
-    if (screen === 'SETTINGS') {
+    if (screen === 'SETTINGS' || screen === 'MANUAL') {
       setScreen('MENU');
       showToast('Menu');
       return;
@@ -1368,6 +1369,23 @@ export function App() {
     ],
   );
 
+  const handleOpenManual = useCallback(() => {
+    setScreen('MANUAL');
+    setManualSectionIndex(0);
+    pushHistorySubstate();
+  }, [pushHistorySubstate]);
+
+  const handleOpenSettings = useCallback(() => {
+    setScreen('SETTINGS');
+    setSettingsRowIndex(0);
+    pushHistorySubstate();
+  }, [pushHistorySubstate]);
+
+  const handleBackToMenu = useCallback(() => {
+    setScreen('MENU');
+    showToast('Menu');
+  }, [showToast]);
+
   // Unified Wristband Gesture Handlers
   const handleSwipe = useCallback(
     (dir: 'up' | 'down' | 'left' | 'right') => {
@@ -1389,13 +1407,13 @@ export function App() {
             if (menuSelectedIndex >= 3) {
               setMenuSelectedIndex(idx => idx - 3);
             } else {
-              setMenuFocusArea('GEAR');
+              setMenuFocusArea(menuSelectedIndex === 2 ? 'GEAR' : 'MANUAL');
             }
           }
           return;
         }
         if (dir === 'down') {
-          if (menuFocusArea === 'GEAR') {
+          if (menuFocusArea === 'GEAR' || menuFocusArea === 'MANUAL') {
             setMenuFocusArea('CARDS');
           } else if (menuSelectedIndex + 3 <= docs.length) {
             setMenuSelectedIndex(idx => idx + 3);
@@ -1406,6 +1424,17 @@ export function App() {
           setMenuSelectedIndex(idx =>
             Math.max(0, Math.min(docs.length, idx + (dir === 'right' ? 1 : -1))),
           );
+        } else {
+          setMenuFocusArea(dir === 'right' ? 'GEAR' : 'MANUAL');
+        }
+        return;
+      }
+
+      if (screen === 'MANUAL') {
+        if (dir === 'down' || dir === 'right') {
+          setManualSectionIndex(idx => Math.min(3, idx + 1));
+        } else {
+          setManualSectionIndex(idx => Math.max(0, idx - 1));
         }
         return;
       }
@@ -1544,10 +1573,12 @@ export function App() {
         }
         return;
       }
+      if (menuFocusArea === 'MANUAL') {
+        handleOpenManual();
+        return;
+      }
       if (menuFocusArea === 'GEAR') {
-        setScreen('SETTINGS');
-        setSettingsRowIndex(0);
-        pushHistorySubstate();
+        handleOpenSettings();
         return;
       }
       if (menuSelectedIndex < docs.length) {
@@ -1555,6 +1586,11 @@ export function App() {
       } else {
         handleCreateNewDoc();
       }
+      return;
+    }
+
+    if (screen === 'MANUAL') {
+      handleBackToMenu();
       return;
     }
 
@@ -1613,8 +1649,11 @@ export function App() {
     drawSubIndex,
     drawSubmenu,
     drawTopIndex,
+    handleBackToMenu,
     handleConfirmDeleteDoc,
     handleCreateNewDoc,
+    handleOpenManual,
+    handleOpenSettings,
     handleSelectDrawTop,
     handleSelectWriteTop,
     handleTogglePinDoc,
@@ -1622,7 +1661,6 @@ export function App() {
     menuSelectedIndex,
     modeSelectorActive,
     openDocument,
-    pushHistorySubstate,
     screen,
     settingsRowIndex,
     writeSubIndex,
@@ -1826,7 +1864,7 @@ export function App() {
           screen === 'DOCUMENT' ? 'is-document-screen' : 'is-menu-screen'
         }`}
       >
-        {(screen === 'MENU' || screen === 'SETTINGS') && (
+        {(screen === 'MENU' || screen === 'SETTINGS' || screen === 'MANUAL') && (
           <MenuScreen
             screen={screen}
             docs={docs}
@@ -1838,12 +1876,16 @@ export function App() {
             deleteConfirmDocId={deleteConfirmDocId}
             deleteConfirmYes={deleteConfirmYes}
             settingsRowIndex={settingsRowIndex}
+            manualSectionIndex={manualSectionIndex}
             onCloseCardOptions={() => setCardOptionsDocId(null)}
+            onOpenManual={handleOpenManual}
+            onOpenSettings={handleOpenSettings}
             onSetThemeMode={themeMode => setSettings(s => ({ ...s, themeMode }))}
             onSetWristMappingMode={wristMappingMode =>
               setSettings(s => ({ ...s, wristMappingMode }))
             }
-            onBackFromSettings={() => setScreen('MENU')}
+            onBackFromSettings={handleBackToMenu}
+            onBackFromManual={handleBackToMenu}
           />
         )}
 
