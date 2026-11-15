@@ -141,12 +141,12 @@ export function gravityRollAngle(q: Quat): number {
   const right = cross(dir, WORLD_UP);
   const horizLen = Math.hypot(right[0], right[1], right[2]);
   if (horizLen < 0.2) {
-    return twistAngle(q);
+    return -twistAngle(q);
   }
   const rightUnit: Vec3 = [right[0] / horizLen, right[1] / horizLen, right[2] / horizLen];
   const upUnit = normalize(cross(rightUnit, dir));
   const acrossWorld = rotate(q, [1, 0, 0]);
-  return Math.atan2(-dot(acrossWorld, upUnit), dot(acrossWorld, rightUnit));
+  return -Math.atan2(-dot(acrossWorld, upUnit), dot(acrossWorld, rightUnit));
 }
 
 export interface PointingBasis {
@@ -192,21 +192,27 @@ export function projectPointingDelta(
   q: Quat,
   basis: PointingBasis,
   mappingMode: WristMappingMode = 'stretched-arm',
-): { dx: number; dy: number; rollRad: number } {
+): { dx: number; dy: number; dz: number; rollRad: number } {
   const dir = normalize(pointingDirection(q));
   const dx = -dot(dir, basis.rightAxis);
   const rollRad = wrapAngle(gravityRollAngle(q) - basis.refTwist);
+  const upPitch = dot(dir, basis.upAxis);
+  const dorsal = normalize(rotate(q, [0, 0, 1]));
+  const forwardTilt =
+    dot(dorsal, basis.horizForward) - dot(basis.refDorsal, basis.horizForward);
+  const pitchCoupling = dot(basis.refDorsal, basis.upAxis) * upPitch;
+  const compensatedForward = forwardTilt + pitchCoupling;
+  const horizReach =
+    dot(dir, basis.horizForward) - dot(basis.refDir, basis.horizForward);
+  const dz = compensatedForward * 1.35 + horizReach * 0.85 + rollRad * 0.35;
 
   if (mappingMode === 'horizontal-surface') {
-    const dorsal = normalize(rotate(q, [0, 0, 1]));
-    const forwardTilt =
-      dot(dorsal, basis.horizForward) - dot(basis.refDorsal, basis.horizForward);
-    const dy = dot(dir, basis.upAxis) - forwardTilt * 0.75;
-    return { dx, dy, rollRad };
+    const dy = upPitch - forwardTilt * 0.75;
+    return { dx, dy, dz, rollRad };
   }
 
-  const dy = -dot(dir, basis.upAxis);
-  return { dx, dy, rollRad };
+  const dy = -upPitch;
+  return { dx, dy, dz, rollRad };
 }
 
 export interface WristSensorOptions {
@@ -231,6 +237,7 @@ export class WristSensorController {
   private isSimulating = false;
   private smoothDx = 0;
   private smoothDy = 0;
+  private smoothDz = 0;
   private smoothRoll = 0;
   private hasSmoothSample = false;
   private readonly onReading: (telemetry: WristTelemetry) => void;
@@ -249,6 +256,7 @@ export class WristSensorController {
       this.basis = createPointingBasis(this.latestW3C);
       this.smoothDx = 0;
       this.smoothDy = 0;
+      this.smoothDz = 0;
       this.smoothRoll = 0;
       this.hasSmoothSample = false;
       this.emitTelemetry();
@@ -310,6 +318,7 @@ export class WristSensorController {
     this.basis = createPointingBasis(this.latestW3C);
     this.smoothDx = 0;
     this.smoothDy = 0;
+    this.smoothDz = 0;
     this.smoothRoll = 0;
     this.hasSmoothSample = false;
     this.emitTelemetry();
@@ -326,6 +335,7 @@ export class WristSensorController {
     }
     this.smoothDx = 0;
     this.smoothDy = 0;
+    this.smoothDz = 0;
     this.smoothRoll = 0;
     this.hasSmoothSample = false;
     this.emitTelemetry();
@@ -455,11 +465,12 @@ export class WristSensorController {
     const rawDelta =
       q && this.basis ? projectPointingDelta(q, this.basis, this.mappingMode) : null;
 
-    let smoothedDelta: { dx: number; dy: number } | null = null;
+    let smoothedDelta: { dx: number; dy: number; dz: number } | null = null;
     if (rawDelta) {
       if (!this.hasSmoothSample) {
         this.smoothDx = rawDelta.dx;
         this.smoothDy = rawDelta.dy;
+        this.smoothDz = rawDelta.dz;
         this.smoothRoll = rawDelta.rollRad;
         this.hasSmoothSample = true;
       } else {
@@ -468,11 +479,12 @@ export class WristSensorController {
           stepDist < 0.015 ? 0.14 : Math.min(0.42, 0.14 + (stepDist - 0.015) * 3.5);
         this.smoothDx += alpha * (rawDelta.dx - this.smoothDx);
         this.smoothDy += alpha * (rawDelta.dy - this.smoothDy);
+        this.smoothDz += alpha * (rawDelta.dz - this.smoothDz);
         this.smoothRoll = wrapAngle(
           this.smoothRoll + 0.28 * wrapAngle(rawDelta.rollRad - this.smoothRoll),
         );
       }
-      smoothedDelta = { dx: this.smoothDx, dy: this.smoothDy };
+      smoothedDelta = { dx: this.smoothDx, dy: this.smoothDy, dz: this.smoothDz };
     }
 
     const rollDeg = rawDelta

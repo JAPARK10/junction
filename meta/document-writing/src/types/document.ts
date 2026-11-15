@@ -4,9 +4,9 @@ export const A4_HEIGHT = 792;
 export type AppScreen = 'MENU' | 'SETTINGS' | 'DOCUMENT';
 export type ThemeMode = 'transparent' | 'light';
 export type WristMappingMode = 'stretched-arm' | 'horizontal-surface';
-export type DocInteractionMode = 'VIEW' | 'DRAW' | 'WRITE';
+export type DocInteractionMode = 'DRAW' | 'WRITE';
 
-export type BrushType = 'pen' | 'brush' | 'spray' | 'fill';
+export type BrushType = 'pen' | 'brush' | 'spray' | 'fill' | 'eraser';
 export type ShapeType = 'circle' | 'rectangle' | 'triangle' | 'arrow';
 export type BlockKind = 'p' | 'h1' | 'h2' | 'h3' | 'bullet' | 'numbered' | 'quote';
 
@@ -101,6 +101,7 @@ export const BRUSH_TYPES: readonly { id: BrushType; label: string }[] = [
   { id: 'brush', label: 'Brush' },
   { id: 'spray', label: 'Spray Paint' },
   { id: 'fill', label: 'Fill Color' },
+  { id: 'eraser', label: 'Eraser' },
 ];
 
 export const SHAPE_TYPES: readonly { id: ShapeType; label: string }[] = [
@@ -124,7 +125,7 @@ export interface WristTelemetry {
   rawWFirst: [number, number, number, number] | null;
   w3cQuat: [number, number, number, number] | null;
   pointing: [number, number, number] | null;
-  deltaPointing: { dx: number; dy: number } | null;
+  deltaPointing: { dx: number; dy: number; dz: number } | null;
   rollDeg: number;
   timestamp: number;
   isSimulating: boolean;

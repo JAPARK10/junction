@@ -112,13 +112,13 @@ function createSeedDocuments(): A4Document[] {
         {
           id: 'blk-2',
           kind: 'p',
-          text: '2x Hold + Rotate switches View, Drawing, and Writing modes.',
+          text: '2x Hold + Rotate switches Drawing and Writing modes.',
           fontSize: 15,
         },
         {
           id: 'blk-3',
           kind: 'bullet',
-          text: '1x Hold + Rotate zooms in View or scrubs cursor in Writing.',
+          text: '2x Hold + Move zooms and drags the sheet across modes.',
           fontSize: 15,
         },
         {
@@ -401,7 +401,7 @@ export function App() {
   const [settingsRowIndex, setSettingsRowIndex] = useState<0 | 1>(0);
 
   // Document View mode & viewport state
-  const [docMode, setDocMode] = useState<DocInteractionMode>('VIEW');
+  const [docMode, setDocMode] = useState<DocInteractionMode>('DRAW');
   const [modeSelectorActive, setModeSelectorActive] = useState(false);
   const [hoveredModeIndex, setHoveredModeIndex] = useState(0);
   const [zoom, setZoom] = useState(1.0);
@@ -454,7 +454,6 @@ export function App() {
     | 'write-scrub'
   >('none');
 
-  const viewHoldIntentRef = useRef<'pending' | 'zoom' | 'pan'>('pending');
   const zoomOriginRef = useRef(1.0);
   const panOriginRef = useRef({ panX: 0, panY: 0 });
 
@@ -467,7 +466,7 @@ export function App() {
   const erasePrevPosRef = useRef({ x: A4_WIDTH * 0.5, y: A4_HEIGHT * 0.35 });
   const eraseUndoPushedRef = useRef(false);
 
-  const preSelectorModeRef = useRef<DocInteractionMode>('VIEW');
+  const preSelectorModeRef = useRef<DocInteractionMode>('DRAW');
   const hoveredModeIdxRef = useRef(0);
   const writeScrubOriginCharRef = useRef(0);
   const drawHoldStartedAtRef = useRef(0);
@@ -725,7 +724,7 @@ export function App() {
       activeHoldRef.current = 'none';
       setActiveDocId(docId);
       setScreen('DOCUMENT');
-      setDocMode('VIEW');
+      setDocMode('DRAW');
       setModeSelectorActive(false);
       setHoveredModeIndex(0);
       setZoom(1.0);
@@ -790,22 +789,20 @@ export function App() {
         setTelemetry(t);
         if (!t.deltaPointing || screenRef.current !== 'DOCUMENT') return;
 
-        const { dx, dy } = t.deltaPointing;
+        const { dx, dy, dz } = t.deltaPointing;
         const deltaPxX = dx * POINTER_SCALE;
         const deltaPxY = dy * POINTER_SCALE;
-        const pointingPx = Math.hypot(deltaPxX, deltaPxY);
+        const deltaPxZ = dz * POINTER_SCALE;
+        const pointingPx = Math.hypot(deltaPxX, deltaPxY, deltaPxZ);
         const absRoll = Math.abs(t.rollDeg);
 
-        // 1. Disambiguate 2x Hold between Mode Selector (forearm roll) and Draw Eraser (translation)
+        // 1. Disambiguate 2x Hold between Mode Selector (forearm roll) and Integrated View Mode (zoom + drag)
         if (activeHoldRef.current === 'double-pending') {
-          if (absRoll >= 3.5) {
+          if (absRoll >= 5.0 && Math.hypot(deltaPxX, deltaPxY) < 14) {
             activeHoldRef.current = 'mode-select';
             setModeSelectorActive(true);
-          } else if (docModeRef.current === 'DRAW' && pointingPx >= 12) {
-            activeHoldRef.current = 'draw-erase';
-            eraseUndoPushedRef.current = false;
-            erasePrevPosRef.current = penPosRef.current;
-            setIsErasing(true);
+          } else if (pointingPx >= 8) {
+            activeHoldRef.current = 'view-zoom-pan';
           } else {
             return;
           }
@@ -825,72 +822,27 @@ export function App() {
           return;
         }
 
-        const hold = activeHoldRef.current;
-        const mode = docModeRef.current;
-
-        // 3. VIEW MODE: 1x Hold + Rotate = Zoom, 1x Hold + Move = Pan, Hover = Crosshair
-        if (mode === 'VIEW') {
-          if (hold === 'view-zoom-pan') {
-            if (viewHoldIntentRef.current === 'pending') {
-              if (absRoll >= 4.0 && pointingPx < Math.max(14, absRoll * 2.2)) {
-                viewHoldIntentRef.current = 'zoom';
-              } else if (pointingPx >= 8) {
-                viewHoldIntentRef.current = 'pan';
-              }
-            }
-
-            if (viewHoldIntentRef.current === 'zoom') {
-              const effectiveDeg =
-                absRoll <= 2.5 ? 0 : t.rollDeg > 0 ? t.rollDeg - 2.5 : t.rollDeg + 2.5;
-              const nextZoom = Math.max(
-                MIN_ZOOM,
-                Math.min(MAX_ZOOM, zoomOriginRef.current + effectiveDeg * 0.04),
-              );
-              const clamped = clampPanToZoom(
-                panOriginRef.current.panX,
-                panOriginRef.current.panY,
-                nextZoom,
-              );
-              setZoom(nextZoom);
-              setPanX(clamped.panX);
-              setPanY(clamped.panY);
-            } else if (viewHoldIntentRef.current === 'pan') {
-              const targetPen = clampA4Point(
-                drawOriginRef.current.x + deltaPxX,
-                drawOriginRef.current.y + deltaPxY,
-              );
-              const cur = penPosRef.current;
-              const smoothed = {
-                x: cur.x + (targetPen.x - cur.x) * 0.68,
-                y: cur.y + (targetPen.y - cur.y) * 0.68,
-              };
-              setPenPos(smoothed);
-
-              const targetPan = clampPanToZoom(
-                panOriginRef.current.panX - deltaPxX,
-                panOriginRef.current.panY - deltaPxY,
-                zoomRef.current,
-              );
-              setPanX(targetPan.panX);
-              setPanY(targetPan.panY);
-            }
-            return;
-          }
-
-          if (hold === 'none') {
-            const target = clampA4Point(
-              hoverOriginRef.current.x + deltaPxX,
-              hoverOriginRef.current.y + deltaPxY,
-            );
-            const cur = penPosRef.current;
-            const smoothed = {
-              x: cur.x + (target.x - cur.x) * 0.55,
-              y: cur.y + (target.y - cur.y) * 0.55,
-            };
-            setPenPos(smoothed);
-          }
+        // 3. Integrated View Mode (available across both DRAW and WRITE via 2x Tap Hold + Move)
+        if (activeHoldRef.current === 'view-zoom-pan') {
+          // Moving wristband up (-deltaPxY > 0) zooms in; moving down (-deltaPxY < 0) zooms out
+          const zoomDelta = (-deltaPxY) / 140;
+          const nextZoom = Math.max(
+            MIN_ZOOM,
+            Math.min(MAX_ZOOM, zoomOriginRef.current + zoomDelta),
+          );
+          // Moving wristband right (deltaPxX > 0) drags document left (-panX); left drags right (+panX)
+          // Moving wristband away/front (deltaPxZ > 0) drags document down (+panY); back drags up (-panY)
+          const rawPanX = panOriginRef.current.panX - deltaPxX * 1.15;
+          const rawPanY = panOriginRef.current.panY + deltaPxZ * 1.25;
+          const clamped = clampPanToZoom(rawPanX, rawPanY, nextZoom);
+          setZoom(nextZoom);
+          setPanX(clamped.panX);
+          setPanY(clamped.panY);
           return;
         }
+
+        const hold = activeHoldRef.current;
+        const mode = docModeRef.current;
 
         // 4. DRAW MODE
         if (mode === 'DRAW') {
@@ -1090,12 +1042,10 @@ export function App() {
     }
 
     if (screen === 'MENU') {
-      if (deleteConfirmDocId) {
+      if (deleteConfirmDocId || cardOptionsDocId) {
         setDeleteConfirmDocId(null);
-        return;
-      }
-      if (cardOptionsDocId) {
         setCardOptionsDocId(null);
+        showToast('Closed options');
         return;
       }
       if (menuFocusArea === 'GEAR') {
@@ -1335,11 +1285,21 @@ export function App() {
           return;
         }
         if (dir === 'up') {
-          setMenuFocusArea('GEAR');
+          if (menuFocusArea === 'CARDS') {
+            if (menuSelectedIndex >= 3) {
+              setMenuSelectedIndex(idx => idx - 3);
+            } else {
+              setMenuFocusArea('GEAR');
+            }
+          }
           return;
         }
         if (dir === 'down') {
-          setMenuFocusArea('CARDS');
+          if (menuFocusArea === 'GEAR') {
+            setMenuFocusArea('CARDS');
+          } else if (menuSelectedIndex + 3 <= docs.length) {
+            setMenuSelectedIndex(idx => idx + 3);
+          }
           return;
         }
         if (menuFocusArea === 'CARDS') {
@@ -1456,6 +1416,7 @@ export function App() {
       drawSubmenu,
       hoveredModeIndex,
       menuFocusArea,
+      menuSelectedIndex,
       modeSelectorActive,
       moveWriteLine,
       screen,
@@ -1593,6 +1554,7 @@ export function App() {
       ) {
         setCardOptionsDocId(docs[menuSelectedIndex].id);
         setCardOptionIndex(0);
+        pushHistorySubstate();
       }
       return;
     }
@@ -1606,19 +1568,17 @@ export function App() {
 
     sensorRef.current?.captureReference();
 
-    if (docMode === 'VIEW') {
-      activeHoldRef.current = 'view-zoom-pan';
-      viewHoldIntentRef.current = 'pending';
-      zoomOriginRef.current = zoomRef.current;
-      panOriginRef.current = panRef.current;
-      drawOriginRef.current = penPosRef.current;
-      return;
-    }
-
     if (docMode === 'DRAW') {
+      drawOriginRef.current = penPosRef.current;
+      if (drawToolRef.current === 'brush' && selectedBrushRef.current === 'eraser') {
+        activeHoldRef.current = 'draw-erase';
+        eraseUndoPushedRef.current = false;
+        erasePrevPosRef.current = penPosRef.current;
+        setIsErasing(true);
+        return;
+      }
       activeHoldRef.current = 'draw-paint';
       drawHoldStartedAtRef.current = performance.now();
-      drawOriginRef.current = penPosRef.current;
       beginDrawOrShapeAt(penPosRef.current);
       return;
     }
@@ -1640,6 +1600,7 @@ export function App() {
     menuFocusArea,
     menuSelectedIndex,
     modeSelectorActive,
+    pushHistorySubstate,
     screen,
   ]);
 
@@ -1648,8 +1609,9 @@ export function App() {
     activeHoldRef.current = 'none';
     setIsCursorScrubbing(false);
 
-    if (hold === 'view-zoom-pan') {
-      viewHoldIntentRef.current = 'pending';
+    if (hold === 'draw-erase') {
+      setIsErasing(false);
+      eraseUndoPushedRef.current = false;
       hoverOriginRef.current = penPosRef.current;
       sensorRef.current?.clearReference();
       return;
@@ -1680,6 +1642,8 @@ export function App() {
     const idx = DOC_MODES.findIndex(m => m.id === docModeRef.current);
     hoveredModeIdxRef.current = idx >= 0 ? idx : 0;
     setHoveredModeIndex(hoveredModeIdxRef.current);
+    zoomOriginRef.current = zoomRef.current;
+    panOriginRef.current = panRef.current;
     drawOriginRef.current = penPosRef.current;
   }, [screen]);
 
@@ -1687,9 +1651,7 @@ export function App() {
     const hold = activeHoldRef.current;
     activeHoldRef.current = 'none';
 
-    if (hold === 'draw-erase') {
-      setIsErasing(false);
-      eraseUndoPushedRef.current = false;
+    if (hold === 'view-zoom-pan') {
       hoverOriginRef.current = penPosRef.current;
       sensorRef.current?.clearReference();
       return;
@@ -1799,7 +1761,10 @@ export function App() {
               penColor={selectedColor}
               penWidth={selectedThickness}
               rollDeg={telemetry.rollDeg}
-              isErasing={isErasing}
+              isErasing={
+                isErasing ||
+                (docMode === 'DRAW' && drawTool === 'brush' && selectedBrush === 'eraser')
+              }
               isCursorScrubbing={isCursorScrubbing}
               onSelectLine={handleSelectLine}
             />

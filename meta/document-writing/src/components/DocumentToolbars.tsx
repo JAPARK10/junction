@@ -16,7 +16,6 @@ import {
 import { type InputCapabilityReport, NeuralComposer } from './NeuralComposer';
 
 export const DOC_MODES: readonly { id: DocInteractionMode; label: string }[] = [
-  { id: 'VIEW', label: '🔍 View Mode' },
   { id: 'DRAW', label: '✏️ Drawing Mode' },
   { id: 'WRITE', label: '📝 Writing Mode' },
 ];

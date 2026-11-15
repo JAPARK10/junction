@@ -211,7 +211,7 @@ export function useWristbandControls(handlers: WristbandControlHandlers) {
       // When focused inside a text input (e.g., #neural-writer-input in Glasses Input),
       // let Enter/Arrows pass untouched to Meta's System Composer; Escape steps up cleanly.
       if (isTextElement(event.target) || isTextElement(document.activeElement)) {
-        if (event.key === 'Escape') {
+        if (event.key === 'Escape' || event.key === 'GoBack' || event.key === 'BrowserBack') {
           event.preventDefault();
           if (!event.repeat) {
             triggerMiddleFingerBack();
@@ -241,7 +241,12 @@ export function useWristbandControls(handlers: WristbandControlHandlers) {
         if (!event.repeat) {
           beginTipPress('key');
         }
-      } else if (event.key === 'Escape' || event.key === 'Backspace') {
+      } else if (
+        event.key === 'Escape' ||
+        event.key === 'Backspace' ||
+        event.key === 'GoBack' ||
+        event.key === 'BrowserBack'
+      ) {
         event.preventDefault();
         if (!event.repeat) {
           triggerMiddleFingerBack();

@@ -108,7 +108,7 @@ export const DocumentCanvas: React.FC<DocumentCanvasProps> = ({
       id="document-sheet"
       tabIndex={0}
       className={`doc-viewport-stage ${
-        mode === 'DRAW' ? 'is-draw-mode' : mode === 'WRITE' ? 'is-write-mode' : 'is-view-mode'
+        mode === 'DRAW' ? 'is-draw-mode' : 'is-write-mode'
       } ${isWindowActive ? 'is-window-active' : 'is-window-inactive'}`}
       aria-label="A4 Document View"
     >

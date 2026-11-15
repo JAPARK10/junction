@@ -199,7 +199,7 @@ function renderShapeElement(shape: DocShape, key: string, isPreview = false): Re
 export const A4PaperView: React.FC<A4PaperViewProps> = ({
   doc,
   paperTheme,
-  mode = 'VIEW',
+  mode = 'DRAW',
   isThumbnail = false,
   activeStroke = null,
   activeShape = null,
@@ -319,7 +319,7 @@ export const A4PaperView: React.FC<A4PaperViewProps> = ({
         {doc.shapes.map(shape => renderShapeElement(shape, shape.id, false))}
         {activeShape && renderShapeElement(activeShape, `${activeShape.id}-preview`, true)}
 
-        {!isThumbnail && (mode === 'DRAW' || mode === 'VIEW') && (
+        {!isThumbnail && mode === 'DRAW' && (
           <g transform={`translate(${penPos.x}, ${penPos.y})`}>
             {isErasing ? (
               <>

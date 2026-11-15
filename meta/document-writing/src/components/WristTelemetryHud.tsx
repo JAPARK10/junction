@@ -128,11 +128,9 @@ export function WristTelemetryHud({
       ? 'EXPLORER MENU'
       : screen === 'SETTINGS'
         ? 'SETTINGS'
-        : docMode === 'DRAW'
-          ? 'DRAWING MODE'
-          : docMode === 'WRITE'
-            ? 'WRITING MODE'
-            : 'VIEW MODE';
+        : docMode === 'WRITE'
+          ? 'WRITING MODE'
+          : 'DRAWING MODE';
 
   return (
     <div className="hud-wrapper">

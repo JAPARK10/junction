@@ -9,7 +9,7 @@ import {
 } from '../types/document';
 import { A4PaperView } from './A4PaperView';
 
-const CARD_THUMB_W = 122;
+const CARD_THUMB_W = 104;
 const CARD_THUMB_H = Math.round((CARD_THUMB_W * A4_HEIGHT) / A4_WIDTH);
 
 interface MenuScreenProps {
@@ -51,7 +51,7 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
     if (screen !== 'MENU' || menuFocusArea !== 'CARDS') return;
     const el = cardRefs.current[menuSelectedIndex];
     if (el && typeof el.scrollIntoView === 'function') {
-      el.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
     }
   }, [menuFocusArea, menuSelectedIndex, screen]);
 
