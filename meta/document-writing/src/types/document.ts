@@ -57,6 +57,7 @@ export interface A4Document {
   title: string;
   pinned: boolean;
   updatedAt: number;
+  backgroundImage?: string;
   blocks: DocBlock[];
   strokes: InkStroke[];
   shapes: DocShape[];

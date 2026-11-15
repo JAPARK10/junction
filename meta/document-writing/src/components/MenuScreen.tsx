@@ -253,9 +253,13 @@ export const MenuScreen: React.FC<MenuScreenProps> = React.memo(({
               <div className="explorer-card-meta">
                 <span className="explorer-card-num">Document {doc.docNumber}</span>
                 <span className="explorer-card-sub">
-                  {doc.strokes.length + doc.shapes.length > 0
-                    ? `${doc.blocks.length} ln · ${doc.strokes.length + doc.shapes.length} ink`
-                    : `${doc.blocks.length} lines`}
+                  {doc.backgroundImage
+                    ? doc.strokes.length + doc.shapes.length > 0
+                      ? `Photo · ${doc.strokes.length + doc.shapes.length} ink`
+                      : 'Photo A4'
+                    : doc.strokes.length + doc.shapes.length > 0
+                      ? `${doc.blocks.length} ln · ${doc.strokes.length + doc.shapes.length} ink`
+                      : `${doc.blocks.length} lines`}
                 </span>
               </div>
             </div>

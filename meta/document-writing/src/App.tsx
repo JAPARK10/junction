@@ -38,6 +38,8 @@ import {
 
 const DOCS_STORAGE_KEY = 'neuraldoc-meta-a4-v2';
 const SETTINGS_STORAGE_KEY = 'neuraldoc-meta-settings-v2';
+const PHOTO_DOC_SEEDED_KEY = 'neuraldoc-meta-photo-seeded-v1';
+const PHOTO_BG_URL = `${import.meta.env.BASE_URL}photo-doc-bg.png`;
 
 const MIN_ZOOM = 1.0;
 const MAX_ZOOM = 3.5;
@@ -80,8 +82,35 @@ function sortDocsWithPinnedFirst(docs: A4Document[]): A4Document[] {
   return [...pinned, ...unpinned];
 }
 
+function createSeedPhotoDocument(docNumber: number, now = Date.now()): A4Document {
+  return {
+    id: 'doc-photo-sample',
+    docNumber,
+    title: `Document ${docNumber} — Photo`,
+    pinned: false,
+    updatedAt: now,
+    backgroundImage: PHOTO_BG_URL,
+    cursor: { lineIndex: 0, charIndex: 0 },
+    blocks: [
+      {
+        id: 'blk-photo-1',
+        kind: 'p',
+        text: '',
+        fontSize: 15,
+      },
+    ],
+    strokes: [],
+    shapes: [],
+  };
+}
+
 function createSeedDocuments(): A4Document[] {
   const now = Date.now();
+  try {
+    localStorage.setItem(PHOTO_DOC_SEEDED_KEY, '1');
+  } catch {
+    // Ignore storage errors
+  }
   return [
     {
       id: 'doc-1',
@@ -120,6 +149,7 @@ function createSeedDocuments(): A4Document[] {
       strokes: [],
       shapes: [],
     },
+    createSeedPhotoDocument(2, now),
   ];
 }
 
@@ -159,7 +189,21 @@ function loadSavedDocuments(): A4Document[] {
         Array.isArray(d.strokes) &&
         Array.isArray(d.shapes),
     );
-    return valid.length > 0 ? sortDocsWithPinnedFirst(valid) : createSeedDocuments();
+    if (valid.length === 0) return createSeedDocuments();
+
+    const normalized = valid.map(d =>
+      typeof d.backgroundImage === 'string' && d.backgroundImage.endsWith('photo-doc-bg.png')
+        ? { ...d, backgroundImage: PHOTO_BG_URL }
+        : d,
+    );
+
+    if (!normalized.some(d => Boolean(d.backgroundImage)) && localStorage.getItem(PHOTO_DOC_SEEDED_KEY) !== '1') {
+      const nextDocNumber = normalized.reduce((max, d) => Math.max(max, d.docNumber), 0) + 1;
+      normalized.push(createSeedPhotoDocument(nextDocNumber));
+      localStorage.setItem(PHOTO_DOC_SEEDED_KEY, '1');
+    }
+
+    return sortDocsWithPinnedFirst(normalized);
   } catch {
     return createSeedDocuments();
   }

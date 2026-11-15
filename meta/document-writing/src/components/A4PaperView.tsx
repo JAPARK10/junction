@@ -228,10 +228,19 @@ export const A4PaperView: React.FC<A4PaperViewProps> = React.memo(({
   return (
     <div
       className={`a4-paper-root ${isLightPaper ? 'is-light-paper' : 'is-transparent-paper'} ${
-        isThumbnail ? 'is-thumbnail' : ''
-      }`}
+        doc.backgroundImage ? 'has-bg-photo' : ''
+      } ${isThumbnail ? 'is-thumbnail' : ''}`}
       style={{ width: A4_WIDTH, height: A4_HEIGHT }}
     >
+      {doc.backgroundImage && (
+        <img
+          className="a4-bg-photo"
+          src={doc.backgroundImage}
+          alt=""
+          draggable={false}
+        />
+      )}
+
       {/* Header inside A4 page */}
       <div className="a4-page-header">
         <span className="a4-doc-num">DOC #{doc.docNumber}</span>
