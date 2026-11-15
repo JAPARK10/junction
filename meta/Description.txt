@@ -1,0 +1,44 @@
+# AirCraft: Create and Annotate Hands-Free on Meta Ray-Ban Display
+
+**AirCraft** is a web app for the Meta Ray-Ban Display glasses. Together with the Meta Neural Band, it turns the glasses into a tool for creating. You can write, draw and annotate documents and photos using only wrist gestures, with no keyboard, mouse or touchscreen.
+
+## Use Cases
+
+AirCraft is for anyone who wants to capture a thought or mark something up without stopping what they are doing.
+
+- **Documents on the go:** write and sketch on a clean A4 sheet while your hands stay free.
+- **Visual annotation:** add notes, drawings and highlights directly on top of photos from your surroundings.
+- **Everyday situations:** anywhere you would normally reach for a phone, notebook or pen, such as work, learning, planning or creative projects.
+
+## Core Feature: Open a Photo You Just Took in AirCraft
+
+AirCraft can open a photo you have just taken with the glasses and turn it into a document you can draw and write on in real time.
+
+We are aware that **WebApps cannot access the camera yet**, so a web app cannot capture photos itself. To work around this, we built our own **platform with user accounts**:
+
+1. The user takes a photo with the glasses.
+2. In the gallery they choose **"Share"**, which uploads the photo to **their profile** on our platform.
+3. In AirCraft the user is signed in to the same account and can choose from **their documents and photos**.
+4. A chosen photo becomes the background of a document. The user can **sketch and write notes on it in real time**.
+
+Each account is a personal **document and photo repository**. It is the source of everything shown in the AirCraft menu. This lets a web app work with photos that were captured only moments earlier.
+
+Annotating photos is a core function of AirCraft. The second core function is **plain document editing**, which offers the same tools on a blank A4 sheet.
+
+## Intuitive Control with Your Wrist
+
+AirCraft is controlled with Neural Band gestures such as swipes, taps, holds and wrist movement. These gestures cover navigation, selection, drawing, zooming and panning. A built-in manual in the app explains all controls.
+
+## A Wide Range of Editing Options
+
+- **Drawing:** several brush types, adjustable line thickness, a broad color palette, geometric shapes and fill options.
+- **Writing:** text styles, headings, formatting, font sizes and lists.
+- **Navigation:** zoom, pan and a minimap for working on details.
+- **Control:** undo history and document management.
+- **Appearance:** a transparent HUD mode for use over the real world, or a classic white paper mode.
+
+Drawings are stored as vectors, so they stay sharp at any zoom level and sit non-destructively on top of the original photo or document.
+
+## Vision
+
+AirCraft makes smart glasses a tool for creating as well as viewing. It combines capture, annotation and storage in one hands-free workflow.
