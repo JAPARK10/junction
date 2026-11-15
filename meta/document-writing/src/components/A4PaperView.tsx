@@ -47,7 +47,11 @@ function buildSmoothSvgPath(points: InkPoint[]): string {
   return d;
 }
 
-function renderStrokeElement(stroke: InkStroke, key: string): React.ReactNode {
+function renderStrokeElement(
+  stroke: InkStroke,
+  key: string,
+  isThumbnail = false,
+): React.ReactNode {
   const pathData = buildSmoothSvgPath(stroke.points);
   if (!pathData) return null;
 
@@ -78,7 +82,11 @@ function renderStrokeElement(stroke: InkStroke, key: string): React.ReactNode {
 
   if (stroke.brushType === 'spray') {
     const radius = Math.max(4, stroke.baseWidth * 1.9);
-    const step = stroke.points.length > 80 ? 2 : 1;
+    const step = isThumbnail
+      ? Math.max(3, Math.ceil(stroke.points.length / 25))
+      : stroke.points.length > 80
+        ? 2
+        : 1;
     const dots: React.ReactNode[] = [];
     for (let i = 0; i < stroke.points.length; i += step) {
       const pt = stroke.points[i];
@@ -196,7 +204,7 @@ function renderShapeElement(shape: DocShape, key: string, isPreview = false): Re
   );
 }
 
-export const A4PaperView: React.FC<A4PaperViewProps> = ({
+export const A4PaperView: React.FC<A4PaperViewProps> = React.memo(({
   doc,
   paperTheme,
   mode = 'DRAW',
@@ -315,7 +323,7 @@ export const A4PaperView: React.FC<A4PaperViewProps> = ({
         preserveAspectRatio="none"
         aria-hidden="true"
       >
-        {allStrokes.map(stroke => renderStrokeElement(stroke, stroke.id))}
+        {allStrokes.map(stroke => renderStrokeElement(stroke, stroke.id, isThumbnail))}
         {doc.shapes.map(shape => renderShapeElement(shape, shape.id, false))}
         {activeShape && renderShapeElement(activeShape, `${activeShape.id}-preview`, true)}
 
@@ -353,4 +361,4 @@ export const A4PaperView: React.FC<A4PaperViewProps> = ({
       </svg>
     </div>
   );
-};
+});

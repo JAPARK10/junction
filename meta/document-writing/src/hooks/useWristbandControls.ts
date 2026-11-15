@@ -18,8 +18,8 @@ export interface WristbandControlHandlers {
   onGestureLog: (label: string, detail: string) => void;
 }
 
-const HOLD_THRESHOLD_MS = 250;
-const MULTI_TAP_WINDOW_MS = 430;
+const HOLD_THRESHOLD_MS = 210;
+const MULTI_TAP_WINDOW_MS = 280;
 const PRESS_DEDUP_MS = 80;
 
 export function useWristbandControls(handlers: WristbandControlHandlers) {
@@ -114,7 +114,12 @@ export function useWristbandControls(handlers: WristbandControlHandlers) {
       tipHoldTimerRef.current = window.setTimeout(() => {
         tipHoldTimerRef.current = null;
         if (tipDownAtRef.current !== null) {
-          const kind = pressTapIndexRef.current >= 1 ? 'double' : 'single';
+          const kind =
+            handlersRef.current.screen !== 'DOCUMENT'
+              ? 'single'
+              : pressTapIndexRef.current >= 1
+                ? 'double'
+                : 'single';
           activateHold(kind);
         }
       }, HOLD_THRESHOLD_MS);
@@ -151,6 +156,16 @@ export function useWristbandControls(handlers: WristbandControlHandlers) {
         activeHoldKindRef.current = 'none';
         h.onGestureLog('1x Hold Release', 'Released 1x hold');
         h.onTipHoldEnd();
+        return;
+      }
+
+      if (handlersRef.current.screen !== 'DOCUMENT') {
+        if (tipTapTimerRef.current !== null) {
+          window.clearTimeout(tipTapTimerRef.current);
+          tipTapTimerRef.current = null;
+        }
+        tipTapCountRef.current = 0;
+        handlersRef.current.onTipSingleTap();
         return;
       }
 

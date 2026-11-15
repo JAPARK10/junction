@@ -27,12 +27,13 @@ interface DocumentCanvasProps {
   isErasing: boolean;
   isCursorScrubbing: boolean;
   onSelectLine: (lineIndex: number, charIndex?: number) => void;
+  onViewportResize?: (w: number, h: number) => void;
 }
 
 const MINIMAP_W = 64;
 const MINIMAP_H = Math.round((MINIMAP_W * A4_HEIGHT) / A4_WIDTH);
 
-export const DocumentCanvas: React.FC<DocumentCanvasProps> = ({
+export const DocumentCanvas: React.FC<DocumentCanvasProps> = React.memo(({
   doc,
   themeMode,
   mode,
@@ -49,6 +50,7 @@ export const DocumentCanvas: React.FC<DocumentCanvasProps> = ({
   isErasing,
   isCursorScrubbing,
   onSelectLine,
+  onViewportResize,
 }) => {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const paperTransformRef = useRef<HTMLDivElement | null>(null);
@@ -61,6 +63,7 @@ export const DocumentCanvas: React.FC<DocumentCanvasProps> = ({
       const rect = el.getBoundingClientRect();
       if (rect.width > 10 && rect.height > 10) {
         setViewSize({ w: rect.width, h: rect.height });
+        onViewportResize?.(rect.width, rect.height);
       }
     };
     measure();
@@ -71,7 +74,7 @@ export const DocumentCanvas: React.FC<DocumentCanvasProps> = ({
     }
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, [mode]);
+  }, [mode, onViewportResize]);
 
   const baseScale = Math.max(
     0.18,
@@ -119,7 +122,7 @@ export const DocumentCanvas: React.FC<DocumentCanvasProps> = ({
         style={{
           width: A4_WIDTH,
           height: A4_HEIGHT,
-          transform: `translate(${clampedPanX}px, ${clampedPanY}px) scale(${effectiveScale})`,
+          transform: `translate3d(${clampedPanX}px, ${clampedPanY}px, 0) scale(${effectiveScale})`,
           transformOrigin: 'center center',
         }}
       >
@@ -170,4 +173,4 @@ export const DocumentCanvas: React.FC<DocumentCanvasProps> = ({
       </div>
     </div>
   );
-};
+});

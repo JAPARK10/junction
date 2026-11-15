@@ -31,8 +31,8 @@ import {
   type DocShape,
   type DrawSubmenu,
   type InkStroke,
+  type SensorStatus,
   type ShapeType,
-  type WristTelemetry,
   type WriteSubmenu,
 } from './types/document';
 
@@ -56,17 +56,6 @@ interface DocumentHistorySnapshot {
 const DEFAULT_SETTINGS: AppSettings = {
   themeMode: 'transparent',
   wristMappingMode: 'stretched-arm',
-};
-
-const INITIAL_TELEMETRY: WristTelemetry = {
-  status: 'checking',
-  rawWFirst: null,
-  w3cQuat: null,
-  pointing: null,
-  deltaPointing: null,
-  rollDeg: 0,
-  timestamp: 0,
-  isSimulating: false,
 };
 
 function makeId(prefix: string): string {
@@ -310,11 +299,12 @@ function shapeTouchesEraser(
   );
 }
 
-function getPanBoundsForZoom(zoom: number): { maxPanX: number; maxPanY: number } {
-  const sheetEl = document.getElementById('document-sheet');
-  const rect = sheetEl?.getBoundingClientRect();
-  const viewW = rect && rect.width > 10 ? rect.width : 540;
-  const viewH = rect && rect.height > 10 ? rect.height : 360;
+function getPanBoundsForZoom(
+  zoom: number,
+  viewSize: { w: number; h: number },
+): { maxPanX: number; maxPanY: number } {
+  const viewW = viewSize.w > 10 ? viewSize.w : 540;
+  const viewH = viewSize.h > 10 ? viewSize.h : 360;
   const baseScale = Math.max(
     0.18,
     Math.min((viewW - 14) / A4_WIDTH, (viewH - 14) / A4_HEIGHT),
@@ -326,8 +316,13 @@ function getPanBoundsForZoom(zoom: number): { maxPanX: number; maxPanY: number }
   };
 }
 
-function clampPanToZoom(panX: number, panY: number, zoom: number): { panX: number; panY: number } {
-  const { maxPanX, maxPanY } = getPanBoundsForZoom(zoom);
+function clampPanToZoom(
+  panX: number,
+  panY: number,
+  zoom: number,
+  viewSize: { w: number; h: number },
+): { panX: number; panY: number } {
+  const { maxPanX, maxPanY } = getPanBoundsForZoom(zoom, viewSize);
   return {
     panX: Math.max(-maxPanX, Math.min(maxPanX, panX)),
     panY: Math.max(-maxPanY, Math.min(maxPanY, panY)),
@@ -435,7 +430,8 @@ export function App() {
   const [rawInputEvents, setRawInputEvents] = useState<string[]>([]);
 
   // Telemetry & toast state
-  const [telemetry, setTelemetry] = useState<WristTelemetry>(INITIAL_TELEMETRY);
+  const [sensorStatus, setSensorStatus] = useState<SensorStatus>('checking');
+  const [scrubRollDeg, setScrubRollDeg] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
 
   // Refs for sensor loops & gesture disambiguation
@@ -443,10 +439,15 @@ export function App() {
   const sensorRef = useRef<WristSensorController | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const undoMapRef = useRef<Map<string, DocumentHistorySnapshot[]>>(new Map());
+  const viewportSizeRef = useRef<{ w: number; h: number }>({ w: 540, h: 360 });
+  const holdLockOffsetRef = useRef<{ dx: number; dy: number; dz: number; rollRad: number } | null>(
+    null,
+  );
 
   const activeHoldRef = useRef<
     | 'none'
-    | 'view-zoom-pan'
+    | 'view-zoom'
+    | 'view-pan'
     | 'draw-paint'
     | 'draw-erase'
     | 'double-pending'
@@ -480,6 +481,8 @@ export function App() {
   activeDocIdRef.current = activeDocId;
   const docModeRef = useRef(docMode);
   docModeRef.current = docMode;
+  const modeSelectorActiveRef = useRef(modeSelectorActive);
+  modeSelectorActiveRef.current = modeSelectorActive;
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
   const panRef = useRef({ panX, panY });
@@ -510,13 +513,16 @@ export function App() {
     toastTimerRef.current = window.setTimeout(() => setToast(null), 1600);
   }, []);
 
-  // Persist docs & settings
+  // Persist docs & settings (debounced so drawing/typing never blocks frame times)
   useEffect(() => {
-    try {
-      localStorage.setItem(DOCS_STORAGE_KEY, JSON.stringify(docs));
-    } catch {
-      // Ignore quota exceeded errors
-    }
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(DOCS_STORAGE_KEY, JSON.stringify(docs));
+      } catch {
+        // Ignore quota exceeded errors
+      }
+    }, 350);
+    return () => window.clearTimeout(timer);
   }, [docs]);
 
   useEffect(() => {
@@ -781,30 +787,56 @@ export function App() {
     [showToast],
   );
 
+  const handleViewportResize = useCallback((w: number, h: number) => {
+    viewportSizeRef.current = { w, h };
+  }, []);
+
   // Initialize WristSensorController once
   useEffect(() => {
     const controller = new WristSensorController({
       initialMappingMode: settings.wristMappingMode,
+      onStatusChange: status => setSensorStatus(status),
       onReading: t => {
-        setTelemetry(t);
         if (!t.deltaPointing || screenRef.current !== 'DOCUMENT') return;
 
         const { dx, dy, dz } = t.deltaPointing;
         const deltaPxX = dx * POINTER_SCALE;
         const deltaPxY = dy * POINTER_SCALE;
         const deltaPxZ = dz * POINTER_SCALE;
-        const pointingPx = Math.hypot(deltaPxX, deltaPxY, deltaPxZ);
         const absRoll = Math.abs(t.rollDeg);
 
-        // 1. Disambiguate 2x Hold between Mode Selector (forearm roll) and Integrated View Mode (zoom + drag)
+        // 1. Disambiguate 2x Hold into strictly exclusive Mode Selector, Zoom-Only, or Pan-Only
         if (activeHoldRef.current === 'double-pending') {
-          if (absRoll >= 5.0 && Math.hypot(deltaPxX, deltaPxY) < 14) {
+          const canPan = zoomRef.current > 1.02;
+          if (
+            (!canPan || modeSelectorActiveRef.current) &&
+            absRoll >= 4.5 &&
+            Math.hypot(deltaPxX, deltaPxY) < 14
+          ) {
             activeHoldRef.current = 'mode-select';
             setModeSelectorActive(true);
-          } else if (pointingPx >= 8) {
-            activeHoldRef.current = 'view-zoom-pan';
           } else {
-            return;
+            const zoomMag = Math.abs(deltaPxY);
+            const panMag = Math.hypot(deltaPxX, deltaPxZ);
+            if (zoomMag >= 8 && (!canPan || zoomMag > panMag * 1.15)) {
+              activeHoldRef.current = 'view-zoom';
+              holdLockOffsetRef.current = {
+                dx,
+                dy,
+                dz,
+                rollRad: (t.rollDeg * Math.PI) / 180,
+              };
+            } else if (canPan && panMag >= 6 && panMag >= zoomMag * 0.9) {
+              activeHoldRef.current = 'view-pan';
+              holdLockOffsetRef.current = {
+                dx,
+                dy,
+                dz,
+                rollRad: (t.rollDeg * Math.PI) / 180,
+              };
+            } else {
+              return;
+            }
           }
         }
 
@@ -822,20 +854,41 @@ export function App() {
           return;
         }
 
-        // 3. Integrated View Mode (available across both DRAW and WRITE via 2x Tap Hold + Move)
-        if (activeHoldRef.current === 'view-zoom-pan') {
-          // Moving wristband up (-deltaPxY > 0) zooms in; moving down (-deltaPxY < 0) zooms out
-          const zoomDelta = (-deltaPxY) / 140;
+        // 3a. Exclusive Zoom Mode (2x Tap Hold + Move Up/Down on Zoom axis dy)
+        if (activeHoldRef.current === 'view-zoom') {
+          const lockDy = holdLockOffsetRef.current?.dy ?? 0;
+          const effDyPx = (dy - lockDy) * POINTER_SCALE;
+          const zoomDelta = (-effDyPx) / 135;
           const nextZoom = Math.max(
             MIN_ZOOM,
             Math.min(MAX_ZOOM, zoomOriginRef.current + zoomDelta),
           );
-          // Moving wristband right (deltaPxX > 0) drags document left (-panX); left drags right (+panX)
-          // Moving wristband away/front (deltaPxZ > 0) drags document down (+panY); back drags up (-panY)
-          const rawPanX = panOriginRef.current.panX - deltaPxX * 1.15;
-          const rawPanY = panOriginRef.current.panY + deltaPxZ * 1.25;
-          const clamped = clampPanToZoom(rawPanX, rawPanY, nextZoom);
+          const clamped = clampPanToZoom(
+            panRef.current.panX,
+            panRef.current.panY,
+            nextZoom,
+            viewportSizeRef.current,
+          );
           setZoom(nextZoom);
+          setPanX(clamped.panX);
+          setPanY(clamped.panY);
+          return;
+        }
+
+        // 3b. Exclusive Pan/Drag Mode (2x Tap Hold + Left/Right dx or 3rd-axis Up/Down dz)
+        if (activeHoldRef.current === 'view-pan') {
+          const lockDx = holdLockOffsetRef.current?.dx ?? 0;
+          const lockDz = holdLockOffsetRef.current?.dz ?? 0;
+          const effDxPx = (dx - lockDx) * POINTER_SCALE;
+          const effDzPx = (dz - lockDz) * POINTER_SCALE;
+          const rawPanX = panOriginRef.current.panX - effDxPx * 2.4;
+          const rawPanY = panOriginRef.current.panY + effDzPx * 2.5;
+          const clamped = clampPanToZoom(
+            rawPanX,
+            rawPanY,
+            zoomRef.current,
+            viewportSizeRef.current,
+          );
           setPanX(clamped.panX);
           setPanY(clamped.panY);
           return;
@@ -888,13 +941,16 @@ export function App() {
               x: cur.x + (target.x - cur.x) * 0.55,
               y: cur.y + (target.y - cur.y) * 0.55,
             };
-            setPenPos(smoothed);
+            if (Math.hypot(smoothed.x - cur.x, smoothed.y - cur.y) >= 0.35) {
+              setPenPos(smoothed);
+            }
           }
           return;
         }
 
         // 5. WRITE MODE: 1x Hold + Rotate Arm scrubs character cursor along line
         if (mode === 'WRITE' && hold === 'write-scrub') {
+          setScrubRollDeg(prev => (Math.abs(prev - t.rollDeg) >= 0.5 ? t.rollDeg : prev));
           const doc = activeDocRef.current;
           if (!doc) return;
           const block = doc.blocks[doc.cursor.lineIndex];
@@ -1638,6 +1694,7 @@ export function App() {
     if (screen !== 'DOCUMENT') return;
     sensorRef.current?.captureReference();
     activeHoldRef.current = 'double-pending';
+    holdLockOffsetRef.current = null;
     preSelectorModeRef.current = docModeRef.current;
     const idx = DOC_MODES.findIndex(m => m.id === docModeRef.current);
     hoveredModeIdxRef.current = idx >= 0 ? idx : 0;
@@ -1650,8 +1707,9 @@ export function App() {
   const handleTipDoubleHoldEnd = useCallback(() => {
     const hold = activeHoldRef.current;
     activeHoldRef.current = 'none';
+    holdLockOffsetRef.current = null;
 
-    if (hold === 'view-zoom-pan') {
+    if (hold === 'view-zoom' || hold === 'view-pan') {
       hoverOriginRef.current = penPosRef.current;
       sensorRef.current?.clearReference();
       return;
@@ -1666,7 +1724,7 @@ export function App() {
   useWristbandControls({
     screen,
     docMode,
-    isLiveWristSensor: telemetry.status === 'live',
+    isLiveWristSensor: sensorStatus === 'live',
     onSwipe: handleSwipe,
     onTipSingleTap: handleTipSingleTap,
     onTipDoubleTap: handleTipDoubleTap,
@@ -1701,12 +1759,12 @@ export function App() {
   }, []);
 
   const capabilityReport = useMemo<InputCapabilityReport>(() => {
-    const base = readInputCapabilityBaseline(telemetry.status);
+    const base = readInputCapabilityBaseline(sensorStatus);
     return {
       ...base,
       lastRawEvents: rawInputEvents,
     };
-  }, [rawInputEvents, telemetry.status]);
+  }, [rawInputEvents, sensorStatus]);
 
   const activeBlock = useMemo(() => {
     if (!activeDoc) return undefined;
@@ -1760,13 +1818,14 @@ export function App() {
               penPos={penPos}
               penColor={selectedColor}
               penWidth={selectedThickness}
-              rollDeg={telemetry.rollDeg}
+              rollDeg={scrubRollDeg}
               isErasing={
                 isErasing ||
                 (docMode === 'DRAW' && drawTool === 'brush' && selectedBrush === 'eraser')
               }
               isCursorScrubbing={isCursorScrubbing}
               onSelectLine={handleSelectLine}
+              onViewportResize={handleViewportResize}
             />
 
             <DocumentToolbars

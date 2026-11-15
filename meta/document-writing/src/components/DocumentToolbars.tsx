@@ -94,7 +94,7 @@ interface DocumentToolbarsProps {
   onRecordRawInputEvent: (eventName: string, detail: string) => void;
 }
 
-export const DocumentToolbars: React.FC<DocumentToolbarsProps> = ({
+export const DocumentToolbars: React.FC<DocumentToolbarsProps> = React.memo(({
   mode,
   modeSelectorActive,
   hoveredModeIndex,
@@ -485,4 +485,4 @@ export const DocumentToolbars: React.FC<DocumentToolbarsProps> = ({
       </nav>
     </section>
   );
-};
+});

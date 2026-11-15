@@ -29,7 +29,7 @@ interface MenuScreenProps {
   onBackFromSettings: () => void;
 }
 
-export const MenuScreen: React.FC<MenuScreenProps> = ({
+export const MenuScreen: React.FC<MenuScreenProps> = React.memo(({
   screen,
   docs,
   settings,
@@ -288,4 +288,4 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
       </div>
     </section>
   );
-};
+});
