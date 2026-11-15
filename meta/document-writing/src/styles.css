@@ -343,10 +343,12 @@ body {
   white-space: nowrap;
 }
 
-.menu-demo-btn:hover {
-  background: rgba(69, 230, 255, 0.26);
+.menu-demo-btn:hover,
+.menu-demo-btn.is-focused {
+  background: rgba(69, 230, 255, 0.28);
   border-color: #ffffff;
   color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.45);
 }
 
 .menu-gear-btn {

@@ -452,7 +452,7 @@ export function App() {
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
 
   // Explorer Menu & Settings state
-  const [menuFocusArea, setMenuFocusArea] = useState<'CARDS' | 'MANUAL' | 'GEAR'>('CARDS');
+  const [menuFocusArea, setMenuFocusArea] = useState<'CARDS' | 'DEMO' | 'MANUAL' | 'GEAR'>('CARDS');
   const [menuSelectedIndex, setMenuSelectedIndex] = useState(0);
   const [cardOptionsDocId, setCardOptionsDocId] = useState<string | null>(null);
   const [cardOptionIndex, setCardOptionIndex] = useState<0 | 1>(0);
@@ -1181,7 +1181,7 @@ export function App() {
         showToast('Closed options');
         return;
       }
-      if (menuFocusArea === 'GEAR' || menuFocusArea === 'MANUAL') {
+      if (menuFocusArea === 'DEMO' || menuFocusArea === 'GEAR' || menuFocusArea === 'MANUAL') {
         setMenuFocusArea('CARDS');
       }
       return;
@@ -1674,13 +1674,15 @@ export function App() {
             if (menuSelectedIndex >= 3) {
               setMenuSelectedIndex(idx => idx - 3);
             } else {
-              setMenuFocusArea(menuSelectedIndex === 2 ? 'GEAR' : 'MANUAL');
+              setMenuFocusArea(
+                menuSelectedIndex === 0 ? 'DEMO' : menuSelectedIndex === 1 ? 'MANUAL' : 'GEAR',
+              );
             }
           }
           return;
         }
         if (dir === 'down') {
-          if (menuFocusArea === 'GEAR' || menuFocusArea === 'MANUAL') {
+          if (menuFocusArea !== 'CARDS') {
             setMenuFocusArea('CARDS');
           } else if (menuSelectedIndex + 3 <= docs.length) {
             setMenuSelectedIndex(idx => idx + 3);
@@ -1692,7 +1694,13 @@ export function App() {
             Math.max(0, Math.min(docs.length, idx + (dir === 'right' ? 1 : -1))),
           );
         } else {
-          setMenuFocusArea(dir === 'right' ? 'GEAR' : 'MANUAL');
+          const topOrder: Array<'DEMO' | 'MANUAL' | 'GEAR'> = ['DEMO', 'MANUAL', 'GEAR'];
+          const curIdx = topOrder.indexOf(menuFocusArea);
+          const nextIdx = Math.max(
+            0,
+            Math.min(topOrder.length - 1, curIdx + (dir === 'right' ? 1 : -1)),
+          );
+          setMenuFocusArea(topOrder[nextIdx]);
         }
         return;
       }
@@ -1840,6 +1848,10 @@ export function App() {
         }
         return;
       }
+      if (menuFocusArea === 'DEMO') {
+        handleStartDemo();
+        return;
+      }
       if (menuFocusArea === 'MANUAL') {
         handleOpenManual();
         return;
@@ -1923,6 +1935,7 @@ export function App() {
     handleOpenSettings,
     handleSelectDrawTop,
     handleSelectWriteTop,
+    handleStartDemo,
     handleTogglePinDoc,
     menuFocusArea,
     menuSelectedIndex,

@@ -16,7 +16,7 @@ interface MenuScreenProps {
   screen: 'MENU' | 'SETTINGS' | 'MANUAL';
   docs: A4Document[];
   settings: AppSettings;
-  menuFocusArea: 'CARDS' | 'MANUAL' | 'GEAR';
+  menuFocusArea: 'CARDS' | 'DEMO' | 'MANUAL' | 'GEAR';
   menuSelectedIndex: number;
   cardOptionsDocId: string | null;
   cardOptionIndex: 0 | 1; // 0 = Pin, 1 = Delete
@@ -238,7 +238,7 @@ export const MenuScreen: React.FC<MenuScreenProps> = React.memo(({
           <button
             type="button"
             tabIndex={-1}
-            className="menu-demo-btn"
+            className={`menu-demo-btn ${menuFocusArea === 'DEMO' ? 'is-focused' : ''}`}
             onClick={onStartDemo}
             title="Start 14s timed Demo 1 (after 3s countdown)"
           >
