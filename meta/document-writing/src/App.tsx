@@ -30,6 +30,7 @@ import {
   type DocInteractionMode,
   type DocShape,
   type DrawSubmenu,
+  type InkPoint,
   type InkStroke,
   type SensorStatus,
   type ShapeType,
@@ -38,8 +39,8 @@ import {
 
 const DOCS_STORAGE_KEY = 'neuraldoc-meta-a4-v2';
 const SETTINGS_STORAGE_KEY = 'neuraldoc-meta-settings-v2';
-const PHOTO_DOC_SEEDED_KEY = 'neuraldoc-meta-photo-seeded-v1';
-const PHOTO_BG_URL = `${import.meta.env.BASE_URL}photo-doc-bg.png`;
+const PHOTO_DOC_SEEDED_KEY = 'neuraldoc-meta-photo-seeded-pxl1';
+const PHOTO_BG_URL = `${import.meta.env.BASE_URL}PXL_20261115_035033206.jpg`;
 
 const MIN_ZOOM = 1.0;
 const MAX_ZOOM = 3.5;
@@ -192,7 +193,8 @@ function loadSavedDocuments(): A4Document[] {
     if (valid.length === 0) return createSeedDocuments();
 
     const normalized = valid.map(d =>
-      typeof d.backgroundImage === 'string' && d.backgroundImage.endsWith('photo-doc-bg.png')
+      d.id === 'doc-photo-sample' ||
+      (typeof d.backgroundImage === 'string' && d.backgroundImage.length > 0)
         ? { ...d, backgroundImage: PHOTO_BG_URL }
         : d,
     );
@@ -424,6 +426,25 @@ function readInputCapabilityBaseline(emgWristStatus: string): InputCapabilityRep
   };
 }
 
+function buildDemoOvalPoints(progress: number): InkPoint[] {
+  const totalSteps = 72;
+  const stepCount = Math.max(2, Math.round(Math.max(0, Math.min(1, progress)) * totalSteps));
+  const cx = A4_WIDTH * 0.5;
+  const cy = 470;
+  const rx = 168;
+  const ry = 94;
+  const pts: InkPoint[] = [];
+  for (let i = 0; i <= stepCount; i += 1) {
+    const angle = -Math.PI * 0.5 + (i / totalSteps) * Math.PI * 2;
+    pts.push({
+      x: cx + Math.cos(angle) * rx,
+      y: cy + Math.sin(angle) * ry,
+      width: 7,
+    });
+  }
+  return pts;
+}
+
 export function App() {
   const [docs, setDocs] = useState<A4Document[]>(loadSavedDocuments);
   const [settings, setSettings] = useState<AppSettings>(loadSavedSettings);
@@ -474,15 +495,24 @@ export function App() {
   const [showProbe, setShowProbe] = useState(false);
   const [rawInputEvents, setRawInputEvents] = useState<string[]>([]);
 
-  // Telemetry & toast state
+  // Telemetry, toast & timed demo state
   const [sensorStatus, setSensorStatus] = useState<SensorStatus>('checking');
   const [scrubRollDeg, setScrubRollDeg] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
+  const [demoPhase, setDemoPhase] = useState<
+    'IDLE' | 'COUNTDOWN' | 'PHOTO_CAPTURE' | 'RUNNING_UI' | 'UI_OFF'
+  >('IDLE');
+  const [demoCountdownSec, setDemoCountdownSec] = useState<number | null>(null);
+  const [demoFlashOpacity, setDemoFlashOpacity] = useState(0);
+  const [demoActionActive, setDemoActionActive] = useState(false);
 
   // Refs for sensor loops & gesture disambiguation
   const writerInputRef = useRef<HTMLInputElement | null>(null);
   const sensorRef = useRef<WristSensorController | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const demoRafRef = useRef<number | null>(null);
+  const demoPhaseRef = useRef(demoPhase);
+  demoPhaseRef.current = demoPhase;
   const undoMapRef = useRef<Map<string, DocumentHistorySnapshot[]>>(new Map());
   const viewportSizeRef = useRef<{ w: number; h: number }>({ w: 540, h: 360 });
   const holdLockOffsetRef = useRef<{ dx: number; dy: number; dz: number; rollRad: number } | null>(
@@ -842,7 +872,9 @@ export function App() {
       initialMappingMode: settings.wristMappingMode,
       onStatusChange: status => setSensorStatus(status),
       onReading: t => {
-        if (!t.deltaPointing || screenRef.current !== 'DOCUMENT') return;
+        if (demoPhaseRef.current !== 'IDLE' || !t.deltaPointing || screenRef.current !== 'DOCUMENT') {
+          return;
+        }
 
         const { dx, dy, dz } = t.deltaPointing;
         const deltaPxX = dx * POINTER_SCALE;
@@ -1386,6 +1418,241 @@ export function App() {
     showToast('Menu');
   }, [showToast]);
 
+  const handleExitDemo = useCallback(() => {
+    if (demoRafRef.current !== null) {
+      cancelAnimationFrame(demoRafRef.current);
+      demoRafRef.current = null;
+    }
+    setDemoFlashOpacity(0);
+    setDemoCountdownSec(null);
+    setDemoActionActive(false);
+    setActiveStroke(null);
+    setDemoPhase('IDLE');
+    setActiveDocId(null);
+    setScreen('MENU');
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && demoPhaseRef.current !== 'IDLE') {
+        handleExitDemo();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      if (demoRafRef.current !== null) {
+        cancelAnimationFrame(demoRafRef.current);
+        demoRafRef.current = null;
+      }
+    };
+  }, [handleExitDemo]);
+
+  const handleStartDemo = useCallback(() => {
+    if (demoRafRef.current !== null) {
+      cancelAnimationFrame(demoRafRef.current);
+      demoRafRef.current = null;
+    }
+
+    const currentDocs = docsRef.current;
+    const existingPhoto = currentDocs.find(
+      d => d.id === 'doc-photo-sample' || Boolean(d.backgroundImage),
+    );
+    let nextDocs: A4Document[];
+    let targetDocId: string;
+
+    if (existingPhoto) {
+      targetDocId = existingPhoto.id;
+      nextDocs = sortDocsWithPinnedFirst(
+        currentDocs.map(d =>
+          d.id === targetDocId
+            ? { ...d, backgroundImage: PHOTO_BG_URL, strokes: [], shapes: [] }
+            : d,
+        ),
+      );
+    } else {
+      const nextNum = currentDocs.reduce((max, d) => Math.max(max, d.docNumber), 0) + 1;
+      const created = createSeedPhotoDocument(nextNum);
+      targetDocId = created.id;
+      nextDocs = sortDocsWithPinnedFirst([...currentDocs, created]);
+    }
+
+    const targetIdx = Math.max(
+      0,
+      nextDocs.findIndex(d => d.id === targetDocId),
+    );
+
+    setDocs(nextDocs);
+    setToast(null);
+    setActiveStroke(null);
+    setActiveShape(null);
+    setIsErasing(false);
+    setZoom(1.0);
+    setPanX(0);
+    setPanY(0);
+    setDemoFlashOpacity(0);
+    setDemoActionActive(false);
+    setDemoCountdownSec(3);
+    setDemoPhase('COUNTDOWN');
+
+    const t0 = performance.now() + 3000;
+    let stage:
+      | 'countdown'
+      | 'photo'
+      | 'menu-open'
+      | 'doc-open'
+      | 'doc-zoom'
+      | 'doc-oval'
+      | 'doc-hold'
+      | 'menu-end' = 'countdown';
+
+    const tick = (now: number) => {
+      const elapsedSec = (now - t0) / 1000;
+
+      if (elapsedSec < 0) {
+        const cd = elapsedSec < -0.4 ? Math.ceil(-elapsedSec) : null;
+        setDemoCountdownSec(prev => (prev === cd ? prev : cd));
+        demoRafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      if (elapsedSec < 2.0) {
+        if (stage !== 'photo') {
+          stage = 'photo';
+          setDemoCountdownSec(null);
+          setDemoPhase('PHOTO_CAPTURE');
+          setDemoActionActive(false);
+        }
+        setDemoFlashOpacity(elapsedSec < 0.45 ? Math.max(0, 1 - elapsedSec / 0.45) : 0);
+        if (elapsedSec >= 1.45) {
+          setDemoActionActive(true);
+        }
+        demoRafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      if (elapsedSec < 3.0) {
+        if (stage !== 'menu-open') {
+          stage = 'menu-open';
+          setDemoFlashOpacity(0);
+          setDemoActionActive(false);
+          setDemoPhase('RUNNING_UI');
+          setScreen('MENU');
+          setActiveDocId(null);
+          setCardOptionsDocId(null);
+          setDeleteConfirmDocId(null);
+          setMenuFocusArea('CARDS');
+          setMenuSelectedIndex(targetIdx);
+        }
+        demoRafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      if (elapsedSec < 7.5) {
+        if (stage !== 'doc-open') {
+          stage = 'doc-open';
+          setActiveDocId(targetDocId);
+          setScreen('DOCUMENT');
+          setDocMode('DRAW');
+          setModeSelectorActive(false);
+          setDrawSubmenu(null);
+          setWriteSubmenu(null);
+          setDrawTool('brush');
+          setSelectedBrush('pen');
+          setSelectedColor('#ff3b5c');
+          setSelectedThickness(7);
+          setZoom(1.0);
+          setPanX(0);
+          setPanY(0);
+          setActiveStroke(null);
+          setActiveShape(null);
+          setIsErasing(false);
+          setPenPos({ x: A4_WIDTH * 0.5, y: 376 });
+        }
+        demoRafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      if (elapsedSec < 8.8) {
+        stage = 'doc-zoom';
+        const u = Math.max(0, Math.min(1, (elapsedSec - 7.5) / 0.7));
+        const s = u * u * (3 - 2 * u);
+        const nextZoom = 1.0 + s * 0.55;
+        const clamped = clampPanToZoom(0, -135 * s, nextZoom, viewportSizeRef.current);
+        setZoom(nextZoom);
+        setPanX(clamped.panX);
+        setPanY(clamped.panY);
+        setPenPos({ x: A4_WIDTH * 0.5, y: 376 });
+        demoRafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      if (elapsedSec < 10.0) {
+        if (stage !== 'doc-oval') {
+          stage = 'doc-oval';
+          const clamped = clampPanToZoom(0, -135, 1.55, viewportSizeRef.current);
+          setZoom(1.55);
+          setPanX(clamped.panX);
+          setPanY(clamped.panY);
+        }
+        const ovalProgress = Math.max(0, Math.min(1, (elapsedSec - 8.8) / 1.2));
+        const pts = buildDemoOvalPoints(ovalProgress);
+        setPenPos(pts[pts.length - 1]);
+        setActiveStroke({
+          id: 'demo-oval-stroke',
+          color: '#ff3b5c',
+          baseWidth: 7,
+          brushType: 'pen',
+          points: pts,
+        });
+        demoRafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      if (elapsedSec < 13.0) {
+        if (stage !== 'doc-hold') {
+          stage = 'doc-hold';
+          const finalPts = buildDemoOvalPoints(1);
+          const finalStroke: InkStroke = {
+            id: 'demo-oval-stroke',
+            color: '#ff3b5c',
+            baseWidth: 7,
+            brushType: 'pen',
+            points: finalPts,
+          };
+          setPenPos(finalPts[finalPts.length - 1]);
+          setActiveStroke(null);
+          setDocs(prev =>
+            prev.map(d =>
+              d.id === targetDocId
+                ? { ...d, updatedAt: Date.now(), strokes: [...d.strokes, finalStroke] }
+                : d,
+            ),
+          );
+        }
+        demoRafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      if (elapsedSec < 14.0) {
+        if (stage !== 'menu-end') {
+          stage = 'menu-end';
+          setActiveDocId(null);
+          setScreen('MENU');
+          setMenuFocusArea('CARDS');
+          setMenuSelectedIndex(targetIdx);
+        }
+        demoRafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      demoRafRef.current = null;
+      setDemoPhase('UI_OFF');
+    };
+
+    demoRafRef.current = requestAnimationFrame(tick);
+  }, []);
+
   // Unified Wristband Gesture Handlers
   const handleSwipe = useCallback(
     (dir: 'up' | 'down' | 'left' | 'right') => {
@@ -1864,32 +2131,69 @@ export function App() {
           screen === 'DOCUMENT' ? 'is-document-screen' : 'is-menu-screen'
         }`}
       >
-        {(screen === 'MENU' || screen === 'SETTINGS' || screen === 'MANUAL') && (
-          <MenuScreen
-            screen={screen}
-            docs={docs}
-            settings={settings}
-            menuFocusArea={menuFocusArea}
-            menuSelectedIndex={menuSelectedIndex}
-            cardOptionsDocId={cardOptionsDocId}
-            cardOptionIndex={cardOptionIndex}
-            deleteConfirmDocId={deleteConfirmDocId}
-            deleteConfirmYes={deleteConfirmYes}
-            settingsRowIndex={settingsRowIndex}
-            manualSectionIndex={manualSectionIndex}
-            onCloseCardOptions={() => setCardOptionsDocId(null)}
-            onOpenManual={handleOpenManual}
-            onOpenSettings={handleOpenSettings}
-            onSetThemeMode={themeMode => setSettings(s => ({ ...s, themeMode }))}
-            onSetWristMappingMode={wristMappingMode =>
-              setSettings(s => ({ ...s, wristMappingMode }))
-            }
-            onBackFromSettings={handleBackToMenu}
-            onBackFromManual={handleBackToMenu}
+        {demoPhase === 'COUNTDOWN' && (
+          <div className="demo-blackout-stage" onClick={handleExitDemo}>
+            {demoCountdownSec !== null && (
+              <div className="demo-countdown-pill">{demoCountdownSec}</div>
+            )}
+          </div>
+        )}
+
+        {demoPhase === 'UI_OFF' && (
+          <div
+            className="demo-blackout-stage"
+            onClick={handleExitDemo}
+            title="Demo finished — click or press Escape to return to Menu"
           />
         )}
 
-        {screen === 'DOCUMENT' && activeDoc && (
+        {demoPhase === 'PHOTO_CAPTURE' && (
+          <div className="demo-capture-stage">
+            <img
+              className="demo-capture-photo"
+              src={PHOTO_BG_URL}
+              alt="Captured scene"
+              draggable={false}
+            />
+            <div className={`demo-open-aircraft-pill ${demoActionActive ? 'is-active' : ''}`}>
+              Open with AirCraft
+            </div>
+            {demoFlashOpacity > 0 && (
+              <div className="demo-camera-flash" style={{ opacity: demoFlashOpacity }} />
+            )}
+          </div>
+        )}
+
+        {(demoPhase === 'IDLE' || demoPhase === 'RUNNING_UI') &&
+          (screen === 'MENU' || screen === 'SETTINGS' || screen === 'MANUAL') && (
+            <MenuScreen
+              screen={screen}
+              docs={docs}
+              settings={settings}
+              menuFocusArea={menuFocusArea}
+              menuSelectedIndex={menuSelectedIndex}
+              cardOptionsDocId={cardOptionsDocId}
+              cardOptionIndex={cardOptionIndex}
+              deleteConfirmDocId={deleteConfirmDocId}
+              deleteConfirmYes={deleteConfirmYes}
+              settingsRowIndex={settingsRowIndex}
+              manualSectionIndex={manualSectionIndex}
+              onCloseCardOptions={() => setCardOptionsDocId(null)}
+              onStartDemo={handleStartDemo}
+              onOpenManual={handleOpenManual}
+              onOpenSettings={handleOpenSettings}
+              onSetThemeMode={themeMode => setSettings(s => ({ ...s, themeMode }))}
+              onSetWristMappingMode={wristMappingMode =>
+                setSettings(s => ({ ...s, wristMappingMode }))
+              }
+              onBackFromSettings={handleBackToMenu}
+              onBackFromManual={handleBackToMenu}
+            />
+          )}
+
+        {(demoPhase === 'IDLE' || demoPhase === 'RUNNING_UI') &&
+          screen === 'DOCUMENT' &&
+          activeDoc && (
           <>
             <DocumentCanvas
               doc={activeDoc}
@@ -1981,7 +2285,9 @@ export function App() {
           </>
         )}
 
-        {toast && <div className="glasses-toast">{toast}</div>}
+        {(demoPhase === 'IDLE' || demoPhase === 'RUNNING_UI') && toast && (
+          <div className="glasses-toast">{toast}</div>
+        )}
       </main>
     </div>
   );
