@@ -240,7 +240,7 @@ export const MenuScreen: React.FC<MenuScreenProps> = React.memo(({
             tabIndex={-1}
             className={`menu-demo-btn ${menuFocusArea === 'DEMO' ? 'is-focused' : ''}`}
             onClick={onStartDemo}
-            title="Start 14s timed Demo 1 (after 3s countdown)"
+            title="Start 17.6s timed Demo 2 (after 3s countdown)"
           >
             ▶ Starte Demo
           </button>

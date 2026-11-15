@@ -39,8 +39,8 @@ import {
 
 const DOCS_STORAGE_KEY = 'neuraldoc-meta-a4-v2';
 const SETTINGS_STORAGE_KEY = 'neuraldoc-meta-settings-v2';
-const PHOTO_DOC_SEEDED_KEY = 'neuraldoc-meta-photo-seeded-pxl1';
-const PHOTO_BG_URL = `${import.meta.env.BASE_URL}PXL_20261115_035033206.jpg`;
+const PHOTO_DOC_SEEDED_KEY = 'neuraldoc-meta-photo-seeded-pxl2';
+const PHOTO_BG_URL = `${import.meta.env.BASE_URL}PXL_20261115_040504936.jpg`;
 
 const MIN_ZOOM = 1.0;
 const MAX_ZOOM = 3.5;
@@ -112,46 +112,7 @@ function createSeedDocuments(): A4Document[] {
   } catch {
     // Ignore storage errors
   }
-  return [
-    {
-      id: 'doc-1',
-      docNumber: 1,
-      title: 'Document 1',
-      pinned: false,
-      updatedAt: now,
-      cursor: { lineIndex: 0, charIndex: 0 },
-      blocks: [
-        {
-          id: 'blk-1',
-          kind: 'h1',
-          text: 'Document 1 — A4 Workspace',
-          bold: true,
-          fontSize: 22,
-        },
-        {
-          id: 'blk-2',
-          kind: 'p',
-          text: '2x Hold + Rotate switches Drawing and Writing modes.',
-          fontSize: 15,
-        },
-        {
-          id: 'blk-3',
-          kind: 'bullet',
-          text: '2x Hold + Move zooms and drags the sheet across modes.',
-          fontSize: 15,
-        },
-        {
-          id: 'blk-4',
-          kind: 'bullet',
-          text: 'Middle Finger Back steps up toolbars or returns to Menu.',
-          fontSize: 15,
-        },
-      ],
-      strokes: [],
-      shapes: [],
-    },
-    createSeedPhotoDocument(2, now),
-  ];
+  return [createSeedPhotoDocument(1, now)];
 }
 
 function createEmptyDocument(docNumber: number): A4Document {
@@ -177,6 +138,9 @@ function createEmptyDocument(docNumber: number): A4Document {
 
 function loadSavedDocuments(): A4Document[] {
   try {
+    if (localStorage.getItem(PHOTO_DOC_SEEDED_KEY) !== '1') {
+      return createSeedDocuments();
+    }
     const raw = localStorage.getItem(DOCS_STORAGE_KEY);
     if (!raw) return createSeedDocuments();
     const parsed = JSON.parse(raw) as A4Document[];
@@ -192,20 +156,25 @@ function loadSavedDocuments(): A4Document[] {
     );
     if (valid.length === 0) return createSeedDocuments();
 
-    const normalized = valid.map(d =>
-      d.id === 'doc-photo-sample' ||
-      (typeof d.backgroundImage === 'string' && d.backgroundImage.length > 0)
-        ? { ...d, backgroundImage: PHOTO_BG_URL }
-        : d,
-    );
+    const photoDocs = valid
+      .filter(
+        d =>
+          d.id === 'doc-photo-sample' ||
+          (typeof d.backgroundImage === 'string' && d.backgroundImage.length > 0),
+      )
+      .slice(0, 1)
+      .map(d => ({
+        ...d,
+        docNumber: 1,
+        title: 'Document 1 — Photo',
+        backgroundImage: PHOTO_BG_URL,
+      }));
 
-    if (!normalized.some(d => Boolean(d.backgroundImage)) && localStorage.getItem(PHOTO_DOC_SEEDED_KEY) !== '1') {
-      const nextDocNumber = normalized.reduce((max, d) => Math.max(max, d.docNumber), 0) + 1;
-      normalized.push(createSeedPhotoDocument(nextDocNumber));
-      localStorage.setItem(PHOTO_DOC_SEEDED_KEY, '1');
+    if (photoDocs.length === 0) {
+      return createSeedDocuments();
     }
 
-    return sortDocsWithPinnedFirst(normalized);
+    return sortDocsWithPinnedFirst(photoDocs);
   } catch {
     return createSeedDocuments();
   }
@@ -426,23 +395,624 @@ function readInputCapabilityBaseline(emgWristStatus: string): InputCapabilityRep
   };
 }
 
-function buildDemoOvalPoints(progress: number): InkPoint[] {
-  const totalSteps = 72;
-  const stepCount = Math.max(2, Math.round(Math.max(0, Math.min(1, progress)) * totalSteps));
-  const cx = A4_WIDTH * 0.5;
-  const cy = 470;
-  const rx = 168;
-  const ry = 94;
-  const pts: InkPoint[] = [];
-  for (let i = 0; i <= stepCount; i += 1) {
-    const angle = -Math.PI * 0.5 + (i / totalSteps) * Math.PI * 2;
-    pts.push({
-      x: cx + Math.cos(angle) * rx,
-      y: cy + Math.sin(angle) * ry,
-      width: 7,
-    });
+const DEMO_PINK_INK = '#ff2ec4';
+
+const DEMO_HANDWRITING_LINES = [
+  'Hey Dad, look at this amazing main stage',
+  'background, I told you junction is going',
+  'to be awesome. Best regards, Jeremias',
+] as const;
+
+interface HandwritingGlyphDef {
+  advance: number;
+  strokes: ReadonlyArray<ReadonlyArray<readonly [number, number]>>;
+}
+
+// Single- and multi-stroke cursive-print glyphs normalized on x:[0..1], y:[0..1] (baseline ~0.96, x-height ~0.42).
+const HANDWRITING_GLYPHS: Record<string, HandwritingGlyphDef> = {
+  H: {
+    advance: 1.0,
+    strokes: [
+      [
+        [0.18, 0.05],
+        [0.15, 0.35],
+        [0.13, 0.66],
+        [0.11, 0.96],
+      ],
+      [
+        [0.82, 0.05],
+        [0.79, 0.35],
+        [0.77, 0.66],
+        [0.75, 0.96],
+      ],
+      [
+        [0.13, 0.51],
+        [0.46, 0.49],
+        [0.79, 0.48],
+      ],
+    ],
+  },
+  D: {
+    advance: 1.0,
+    strokes: [
+      [
+        [0.18, 0.06],
+        [0.16, 0.35],
+        [0.14, 0.65],
+        [0.13, 0.95],
+      ],
+      [
+        [0.14, 0.08],
+        [0.46, 0.05],
+        [0.76, 0.14],
+        [0.90, 0.36],
+        [0.90, 0.62],
+        [0.76, 0.84],
+        [0.44, 0.95],
+        [0.13, 0.95],
+      ],
+    ],
+  },
+  I: {
+    advance: 0.62,
+    strokes: [
+      [
+        [0.24, 0.06],
+        [0.52, 0.05],
+        [0.78, 0.05],
+      ],
+      [
+        [0.52, 0.06],
+        [0.49, 0.36],
+        [0.47, 0.66],
+        [0.45, 0.95],
+      ],
+      [
+        [0.18, 0.96],
+        [0.46, 0.95],
+        [0.74, 0.95],
+      ],
+    ],
+  },
+  B: {
+    advance: 1.0,
+    strokes: [
+      [
+        [0.18, 0.06],
+        [0.16, 0.36],
+        [0.14, 0.66],
+        [0.13, 0.96],
+      ],
+      [
+        [0.17, 0.08],
+        [0.54, 0.05],
+        [0.78, 0.14],
+        [0.78, 0.32],
+        [0.56, 0.45],
+        [0.22, 0.48],
+        [0.24, 0.49],
+        [0.62, 0.51],
+        [0.86, 0.64],
+        [0.84, 0.84],
+        [0.54, 0.95],
+        [0.13, 0.95],
+      ],
+    ],
+  },
+  J: {
+    advance: 0.85,
+    strokes: [
+      [
+        [0.28, 0.07],
+        [0.56, 0.05],
+        [0.84, 0.05],
+      ],
+      [
+        [0.65, 0.06],
+        [0.62, 0.38],
+        [0.58, 0.68],
+        [0.50, 0.89],
+        [0.32, 0.97],
+        [0.15, 0.91],
+        [0.10, 0.78],
+      ],
+    ],
+  },
+  a: {
+    advance: 1.0,
+    strokes: [
+      [
+        [0.78, 0.52],
+        [0.58, 0.41],
+        [0.30, 0.46],
+        [0.13, 0.64],
+        [0.15, 0.86],
+        [0.36, 0.96],
+        [0.62, 0.86],
+        [0.78, 0.55],
+        [0.78, 0.53],
+        [0.76, 0.78],
+        [0.78, 0.94],
+        [0.92, 0.92],
+      ],
+    ],
+  },
+  b: {
+    advance: 1.0,
+    strokes: [
+      [
+        [0.20, 0.04],
+        [0.18, 0.34],
+        [0.16, 0.66],
+        [0.14, 0.95],
+        [0.16, 0.95],
+        [0.44, 0.96],
+        [0.72, 0.89],
+        [0.84, 0.68],
+        [0.76, 0.48],
+        [0.50, 0.42],
+        [0.26, 0.52],
+        [0.16, 0.70],
+      ],
+    ],
+  },
+  c: {
+    advance: 0.92,
+    strokes: [
+      [
+        [0.82, 0.52],
+        [0.60, 0.42],
+        [0.32, 0.46],
+        [0.14, 0.66],
+        [0.18, 0.88],
+        [0.44, 0.96],
+        [0.74, 0.92],
+        [0.90, 0.84],
+      ],
+    ],
+  },
+  d: {
+    advance: 1.0,
+    strokes: [
+      [
+        [0.76, 0.55],
+        [0.54, 0.42],
+        [0.28, 0.48],
+        [0.12, 0.68],
+        [0.18, 0.90],
+        [0.44, 0.96],
+        [0.68, 0.82],
+        [0.80, 0.46],
+        [0.83, 0.06],
+        [0.83, 0.04],
+        [0.80, 0.48],
+        [0.78, 0.86],
+        [0.89, 0.95],
+      ],
+    ],
+  },
+  e: {
+    advance: 0.95,
+    strokes: [
+      [
+        [0.16, 0.70],
+        [0.54, 0.69],
+        [0.82, 0.60],
+        [0.76, 0.44],
+        [0.48, 0.41],
+        [0.22, 0.50],
+        [0.13, 0.74],
+        [0.28, 0.93],
+        [0.60, 0.96],
+        [0.86, 0.87],
+      ],
+    ],
+  },
+  g: {
+    advance: 1.0,
+    strokes: [
+      [
+        [0.78, 0.54],
+        [0.54, 0.42],
+        [0.26, 0.48],
+        [0.12, 0.68],
+        [0.20, 0.89],
+        [0.48, 0.94],
+        [0.72, 0.80],
+        [0.82, 0.48],
+        [0.81, 0.46],
+        [0.78, 0.88],
+        [0.72, 1.16],
+        [0.50, 1.29],
+        [0.24, 1.24],
+        [0.16, 1.12],
+      ],
+    ],
+  },
+  h: {
+    advance: 1.0,
+    strokes: [
+      [
+        [0.20, 0.04],
+        [0.18, 0.34],
+        [0.16, 0.66],
+        [0.14, 0.96],
+        [0.16, 0.92],
+        [0.26, 0.62],
+        [0.46, 0.44],
+        [0.70, 0.46],
+        [0.78, 0.66],
+        [0.78, 0.88],
+        [0.89, 0.95],
+      ],
+    ],
+  },
+  i: {
+    advance: 0.58,
+    strokes: [
+      [
+        [0.48, 0.45],
+        [0.47, 0.70],
+        [0.46, 0.92],
+        [0.62, 0.95],
+      ],
+      [
+        [0.49, 0.21],
+        [0.52, 0.24],
+      ],
+    ],
+  },
+  j: {
+    advance: 0.62,
+    strokes: [
+      [
+        [0.58, 0.45],
+        [0.55, 0.78],
+        [0.50, 1.08],
+        [0.42, 1.24],
+        [0.24, 1.29],
+        [0.10, 1.18],
+      ],
+      [
+        [0.59, 0.20],
+        [0.62, 0.23],
+      ],
+    ],
+  },
+  k: {
+    advance: 0.95,
+    strokes: [
+      [
+        [0.20, 0.04],
+        [0.18, 0.34],
+        [0.16, 0.66],
+        [0.14, 0.96],
+      ],
+      [
+        [0.78, 0.44],
+        [0.48, 0.60],
+        [0.22, 0.71],
+        [0.22, 0.71],
+        [0.54, 0.82],
+        [0.84, 0.96],
+      ],
+    ],
+  },
+  l: {
+    advance: 0.58,
+    strokes: [
+      [
+        [0.47, 0.04],
+        [0.45, 0.34],
+        [0.44, 0.64],
+        [0.45, 0.90],
+        [0.64, 0.95],
+      ],
+    ],
+  },
+  m: {
+    advance: 1.22,
+    strokes: [
+      [
+        [0.10, 0.46],
+        [0.10, 0.72],
+        [0.10, 0.95],
+        [0.16, 0.60],
+        [0.32, 0.44],
+        [0.46, 0.54],
+        [0.48, 0.94],
+        [0.54, 0.60],
+        [0.70, 0.44],
+        [0.84, 0.54],
+        [0.86, 0.88],
+        [0.95, 0.95],
+      ],
+    ],
+  },
+  n: {
+    advance: 1.0,
+    strokes: [
+      [
+        [0.16, 0.46],
+        [0.15, 0.72],
+        [0.14, 0.95],
+        [0.22, 0.62],
+        [0.46, 0.44],
+        [0.70, 0.46],
+        [0.78, 0.66],
+        [0.78, 0.90],
+        [0.90, 0.95],
+      ],
+    ],
+  },
+  o: {
+    advance: 0.96,
+    strokes: [
+      [
+        [0.72, 0.49],
+        [0.46, 0.42],
+        [0.22, 0.50],
+        [0.13, 0.72],
+        [0.24, 0.92],
+        [0.52, 0.96],
+        [0.78, 0.86],
+        [0.86, 0.64],
+        [0.72, 0.48],
+      ],
+    ],
+  },
+  r: {
+    advance: 0.8,
+    strokes: [
+      [
+        [0.22, 0.46],
+        [0.21, 0.72],
+        [0.20, 0.96],
+        [0.28, 0.64],
+        [0.50, 0.44],
+        [0.76, 0.46],
+      ],
+    ],
+  },
+  s: {
+    advance: 0.92,
+    strokes: [
+      [
+        [0.80, 0.50],
+        [0.58, 0.41],
+        [0.30, 0.44],
+        [0.20, 0.56],
+        [0.44, 0.68],
+        [0.74, 0.76],
+        [0.80, 0.89],
+        [0.56, 0.96],
+        [0.26, 0.94],
+        [0.14, 0.86],
+      ],
+    ],
+  },
+  t: {
+    advance: 0.72,
+    strokes: [
+      [
+        [0.46, 0.14],
+        [0.45, 0.46],
+        [0.44, 0.76],
+        [0.46, 0.92],
+        [0.68, 0.95],
+      ],
+      [
+        [0.20, 0.44],
+        [0.48, 0.43],
+        [0.76, 0.42],
+      ],
+    ],
+  },
+  u: {
+    advance: 1.0,
+    strokes: [
+      [
+        [0.18, 0.45],
+        [0.17, 0.74],
+        [0.26, 0.93],
+        [0.46, 0.96],
+        [0.66, 0.84],
+        [0.78, 0.56],
+        [0.80, 0.46],
+        [0.78, 0.82],
+        [0.88, 0.95],
+      ],
+    ],
+  },
+  w: {
+    advance: 1.22,
+    strokes: [
+      [
+        [0.08, 0.45],
+        [0.18, 0.74],
+        [0.24, 0.95],
+        [0.38, 0.72],
+        [0.48, 0.54],
+        [0.49, 0.54],
+        [0.60, 0.76],
+        [0.72, 0.95],
+        [0.84, 0.72],
+        [0.94, 0.45],
+      ],
+    ],
+  },
+  y: {
+    advance: 0.98,
+    strokes: [
+      [
+        [0.16, 0.46],
+        [0.24, 0.76],
+        [0.38, 0.93],
+        [0.58, 0.86],
+        [0.76, 0.56],
+        [0.80, 0.46],
+        [0.72, 0.84],
+        [0.60, 1.16],
+        [0.40, 1.29],
+        [0.18, 1.24],
+      ],
+    ],
+  },
+  z: {
+    advance: 0.92,
+    strokes: [
+      [
+        [0.18, 0.46],
+        [0.50, 0.45],
+        [0.78, 0.45],
+        [0.78, 0.46],
+        [0.48, 0.70],
+        [0.18, 0.94],
+        [0.18, 0.95],
+        [0.52, 0.95],
+        [0.84, 0.94],
+      ],
+    ],
+  },
+  ',': {
+    advance: 0.55,
+    strokes: [
+      [
+        [0.50, 0.86],
+        [0.52, 0.96],
+        [0.42, 1.12],
+        [0.28, 1.20],
+      ],
+    ],
+  },
+  '.': {
+    advance: 0.55,
+    strokes: [
+      [
+        [0.46, 0.91],
+        [0.51, 0.94],
+      ],
+    ],
+  },
+};
+
+function resampleHandwritingPoints(points: InkPoint[], stepPx = 1.8): InkPoint[] {
+  if (points.length <= 1) return points;
+  const out: InkPoint[] = [points[0]];
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const a = points[i];
+    const b = points[i + 1];
+    const dist = Math.hypot(b.x - a.x, b.y - a.y);
+    const steps = Math.max(1, Math.ceil(dist / stepPx));
+    for (let s = 1; s <= steps; s += 1) {
+      const t = s / steps;
+      out.push({
+        x: a.x + (b.x - a.x) * t,
+        y: a.y + (b.y - a.y) * t,
+        width: a.width,
+      });
+    }
   }
-  return pts;
+  return out;
+}
+
+function buildDemoHandwritingStrokes(): InkStroke[] {
+  const startX = 278;
+  const lineYs = [76, 111, 146] as const;
+  const glyphW = 6.6;
+  const glyphH = 15.2;
+  const unitAdvance = 7.2;
+  const baseWidth = 2.0;
+
+  const result: InkStroke[] = [];
+  let strokeCounter = 0;
+  let globalCharIdx = 0;
+
+  DEMO_HANDWRITING_LINES.forEach((lineText, lineIdx) => {
+    let cursorX = startX;
+    const baseY = lineYs[lineIdx];
+
+    for (let i = 0; i < lineText.length; i += 1) {
+      const ch = lineText[i];
+      if (ch === ' ') {
+        cursorX += unitAdvance * 0.58;
+        continue;
+      }
+
+      const glyph = HANDWRITING_GLYPHS[ch];
+      if (!glyph) {
+        cursorX += unitAdvance * 0.7;
+        continue;
+      }
+
+      const baselineJitter = Math.sin(globalCharIdx * 1.9) * 0.45;
+      glyph.strokes.forEach(normStroke => {
+        const rawPoints: InkPoint[] = normStroke.map(([nx, ny]) => ({
+          x: cursorX + nx * glyphW + (0.96 - ny) * 1.25,
+          y: baseY + baselineJitter + ny * glyphH,
+          width: baseWidth,
+        }));
+        const points = resampleHandwritingPoints(rawPoints);
+        strokeCounter += 1;
+        result.push({
+          id: `demo-hw-${strokeCounter}`,
+          color: DEMO_PINK_INK,
+          baseWidth,
+          brushType: 'brush',
+          points,
+        });
+      });
+
+      cursorX += glyph.advance * unitAdvance;
+      globalCharIdx += 1;
+    }
+  });
+
+  return result;
+}
+
+function sliceHandwritingProgress(
+  allStrokes: InkStroke[],
+  totalPoints: number,
+  progress: number,
+): { committed: InkStroke[]; active: InkStroke | null; tip: { x: number; y: number } } {
+  if (allStrokes.length === 0 || totalPoints === 0) {
+    return { committed: [], active: null, tip: { x: 278, y: 80 } };
+  }
+  const firstPt = allStrokes[0].points[0];
+  const lastStroke = allStrokes[allStrokes.length - 1];
+  const lastPt = lastStroke.points[lastStroke.points.length - 1];
+
+  const clamped = Math.max(0, Math.min(1, progress));
+  if (clamped <= 0) {
+    return { committed: [], active: null, tip: { x: firstPt.x, y: firstPt.y } };
+  }
+  if (clamped >= 1) {
+    return { committed: allStrokes, active: null, tip: { x: lastPt.x, y: lastPt.y } };
+  }
+
+  let remaining = Math.max(1, Math.min(totalPoints, Math.round(clamped * totalPoints)));
+  const committed: InkStroke[] = [];
+  let active: InkStroke | null = null;
+  let tip = { x: firstPt.x, y: firstPt.y };
+
+  for (const stroke of allStrokes) {
+    const len = stroke.points.length;
+    if (remaining >= len) {
+      committed.push(stroke);
+      tip = { x: stroke.points[len - 1].x, y: stroke.points[len - 1].y };
+      remaining -= len;
+      if (remaining === 0) break;
+    } else {
+      const partialPts = stroke.points.slice(0, Math.max(1, remaining));
+      const tail = partialPts[partialPts.length - 1];
+      active = { ...stroke, points: partialPts };
+      tip = { x: tail.x, y: tail.y };
+      break;
+    }
+  }
+
+  return { committed, active, tip };
 }
 
 export function App() {
@@ -1454,39 +2024,26 @@ export function App() {
       demoRafRef.current = null;
     }
 
-    const currentDocs = docsRef.current;
-    const existingPhoto = currentDocs.find(
-      d => d.id === 'doc-photo-sample' || Boolean(d.backgroundImage),
-    );
-    let nextDocs: A4Document[];
-    let targetDocId: string;
+    // Keep only the single Demo 2 captured photo document in the Menu
+    const freshPhotoDoc = createSeedPhotoDocument(1, Date.now());
+    const targetDocId = freshPhotoDoc.id;
+    const targetIdx = 0;
+    const nextDocs: A4Document[] = [freshPhotoDoc];
 
-    if (existingPhoto) {
-      targetDocId = existingPhoto.id;
-      nextDocs = sortDocsWithPinnedFirst(
-        currentDocs.map(d =>
-          d.id === targetDocId
-            ? { ...d, backgroundImage: PHOTO_BG_URL, strokes: [], shapes: [] }
-            : d,
-        ),
-      );
-    } else {
-      const nextNum = currentDocs.reduce((max, d) => Math.max(max, d.docNumber), 0) + 1;
-      const created = createSeedPhotoDocument(nextNum);
-      targetDocId = created.id;
-      nextDocs = sortDocsWithPinnedFirst([...currentDocs, created]);
-    }
-
-    const targetIdx = Math.max(
-      0,
-      nextDocs.findIndex(d => d.id === targetDocId),
-    );
+    const handwritingStrokes = buildDemoHandwritingStrokes();
+    const totalHandwritingPoints = handwritingStrokes.reduce((sum, s) => sum + s.points.length, 0);
+    const hwStartPt = handwritingStrokes[0]?.points[0] ?? { x: 278, y: 80 };
+    const docEntryPenPos = { x: 400, y: 120 };
 
     setDocs(nextDocs);
     setToast(null);
     setActiveStroke(null);
     setActiveShape(null);
     setIsErasing(false);
+    setCardOptionsDocId(null);
+    setDeleteConfirmDocId(null);
+    setMenuFocusArea('CARDS');
+    setMenuSelectedIndex(targetIdx);
     setZoom(1.0);
     setPanX(0);
     setPanY(0);
@@ -1496,13 +2053,14 @@ export function App() {
     setDemoPhase('COUNTDOWN');
 
     const t0 = performance.now() + 3000;
+    let committedStrokeCount = 0;
     let stage:
       | 'countdown'
       | 'photo'
       | 'menu-open'
       | 'doc-open'
       | 'doc-zoom'
-      | 'doc-oval'
+      | 'doc-write'
       | 'doc-hold'
       | 'menu-end' = 'countdown';
 
@@ -1516,7 +2074,8 @@ export function App() {
         return;
       }
 
-      if (elapsedSec < 2.0) {
+      // t = 0.0s .. 3.8s: Camera flash capture & exact swipe onto "Open with AirCraft" at t = 3.0s
+      if (elapsedSec < 3.8) {
         if (stage !== 'photo') {
           stage = 'photo';
           setDemoCountdownSec(null);
@@ -1524,14 +2083,15 @@ export function App() {
           setDemoActionActive(false);
         }
         setDemoFlashOpacity(elapsedSec < 0.45 ? Math.max(0, 1 - elapsedSec / 0.45) : 0);
-        if (elapsedSec >= 1.45) {
+        if (elapsedSec >= 3.0) {
           setDemoActionActive(true);
         }
         demoRafRef.current = requestAnimationFrame(tick);
         return;
       }
 
-      if (elapsedSec < 3.0) {
+      // t = 3.8s .. 4.2s: Open Menu with only the captured photo visible and selected
+      if (elapsedSec < 4.2) {
         if (stage !== 'menu-open') {
           stage = 'menu-open';
           setDemoFlashOpacity(0);
@@ -1548,7 +2108,8 @@ export function App() {
         return;
       }
 
-      if (elapsedSec < 7.5) {
+      // t = 4.2s .. 6.0s: Open photo inside Document View
+      if (elapsedSec < 6.0) {
         if (stage !== 'doc-open') {
           stage = 'doc-open';
           setActiveDocId(targetDocId);
@@ -1558,74 +2119,83 @@ export function App() {
           setDrawSubmenu(null);
           setWriteSubmenu(null);
           setDrawTool('brush');
-          setSelectedBrush('pen');
-          setSelectedColor('#ff3b5c');
-          setSelectedThickness(7);
+          setSelectedBrush('brush');
+          setSelectedColor(DEMO_PINK_INK);
+          setSelectedThickness(2);
           setZoom(1.0);
           setPanX(0);
           setPanY(0);
           setActiveStroke(null);
           setActiveShape(null);
           setIsErasing(false);
-          setPenPos({ x: A4_WIDTH * 0.5, y: 376 });
+          setPenPos(docEntryPenPos);
         }
         demoRafRef.current = requestAnimationFrame(tick);
         return;
       }
 
-      if (elapsedSec < 8.8) {
+      // t = 6.0s .. 8.0s: Zoom into the top-right corner of the photo
+      if (elapsedSec < 8.0) {
         stage = 'doc-zoom';
-        const u = Math.max(0, Math.min(1, (elapsedSec - 7.5) / 0.7));
+        const u = Math.max(0, Math.min(1, (elapsedSec - 6.0) / 0.9));
         const s = u * u * (3 - 2 * u);
-        const nextZoom = 1.0 + s * 0.55;
-        const clamped = clampPanToZoom(0, -135 * s, nextZoom, viewportSizeRef.current);
+        const nextZoom = 1.0 + s * 1.85;
+        const clamped = clampPanToZoom(-320 * s, 380 * s, nextZoom, viewportSizeRef.current);
         setZoom(nextZoom);
         setPanX(clamped.panX);
         setPanY(clamped.panY);
-        setPenPos({ x: A4_WIDTH * 0.5, y: 376 });
-        demoRafRef.current = requestAnimationFrame(tick);
-        return;
-      }
-
-      if (elapsedSec < 10.0) {
-        if (stage !== 'doc-oval') {
-          stage = 'doc-oval';
-          const clamped = clampPanToZoom(0, -135, 1.55, viewportSizeRef.current);
-          setZoom(1.55);
-          setPanX(clamped.panX);
-          setPanY(clamped.panY);
-        }
-        const ovalProgress = Math.max(0, Math.min(1, (elapsedSec - 8.8) / 1.2));
-        const pts = buildDemoOvalPoints(ovalProgress);
-        setPenPos(pts[pts.length - 1]);
-        setActiveStroke({
-          id: 'demo-oval-stroke',
-          color: '#ff3b5c',
-          baseWidth: 7,
-          brushType: 'pen',
-          points: pts,
+        setPenPos({
+          x: docEntryPenPos.x + (hwStartPt.x - docEntryPenPos.x) * s,
+          y: docEntryPenPos.y + (hwStartPt.y - docEntryPenPos.y) * s,
         });
         demoRafRef.current = requestAnimationFrame(tick);
         return;
       }
 
-      if (elapsedSec < 13.0) {
+      // t = 8.0s .. 15.0s: Handwrite the 3-line glowing pink message evenly until t = 15.0s
+      if (elapsedSec < 15.0) {
+        if (stage !== 'doc-write') {
+          stage = 'doc-write';
+          const clamped = clampPanToZoom(-320, 380, 2.85, viewportSizeRef.current);
+          setZoom(2.85);
+          setPanX(clamped.panX);
+          setPanY(clamped.panY);
+        }
+        const writeProgress = Math.max(0, Math.min(1, (elapsedSec - 8.0) / 7.0));
+        const slice = sliceHandwritingProgress(
+          handwritingStrokes,
+          totalHandwritingPoints,
+          writeProgress,
+        );
+        setPenPos(slice.tip);
+        setActiveStroke(slice.active);
+        if (slice.committed.length !== committedStrokeCount) {
+          committedStrokeCount = slice.committed.length;
+          setDocs(prev =>
+            prev.map(d =>
+              d.id === targetDocId ? { ...d, strokes: slice.committed } : d,
+            ),
+          );
+        }
+        demoRafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      // t = 15.0s .. 16.0s: Commit finished handwriting and hold for 1s
+      if (elapsedSec < 16.0) {
         if (stage !== 'doc-hold') {
           stage = 'doc-hold';
-          const finalPts = buildDemoOvalPoints(1);
-          const finalStroke: InkStroke = {
-            id: 'demo-oval-stroke',
-            color: '#ff3b5c',
-            baseWidth: 7,
-            brushType: 'pen',
-            points: finalPts,
-          };
-          setPenPos(finalPts[finalPts.length - 1]);
+          const lastStroke = handwritingStrokes[handwritingStrokes.length - 1];
+          const finalTip = lastStroke
+            ? lastStroke.points[lastStroke.points.length - 1]
+            : hwStartPt;
+          setPenPos({ x: finalTip.x, y: finalTip.y });
           setActiveStroke(null);
+          committedStrokeCount = handwritingStrokes.length;
           setDocs(prev =>
             prev.map(d =>
               d.id === targetDocId
-                ? { ...d, updatedAt: Date.now(), strokes: [...d.strokes, finalStroke] }
+                ? { ...d, updatedAt: Date.now(), strokes: handwritingStrokes }
                 : d,
             ),
           );
@@ -1634,9 +2204,11 @@ export function App() {
         return;
       }
 
-      if (elapsedSec < 14.0) {
+      // t = 16.0s .. 17.6s: Return to Main Menu
+      if (elapsedSec < 17.6) {
         if (stage !== 'menu-end') {
           stage = 'menu-end';
+          setActiveStroke(null);
           setActiveDocId(null);
           setScreen('MENU');
           setMenuFocusArea('CARDS');
@@ -1646,6 +2218,7 @@ export function App() {
         return;
       }
 
+      // t = 17.6s: Close / turn off UI completely
       demoRafRef.current = null;
       setDemoPhase('UI_OFF');
     };
