@@ -16,7 +16,7 @@ interface MenuScreenProps {
   screen: 'MENU' | 'SETTINGS' | 'MANUAL';
   docs: A4Document[];
   settings: AppSettings;
-  menuFocusArea: 'CARDS' | 'DEMO' | 'MANUAL' | 'GEAR';
+  menuFocusArea: 'CARDS' | 'MANUAL' | 'GEAR';
   menuSelectedIndex: number;
   cardOptionsDocId: string | null;
   cardOptionIndex: 0 | 1; // 0 = Pin, 1 = Delete
@@ -25,7 +25,6 @@ interface MenuScreenProps {
   settingsRowIndex: 0 | 1;
   manualSectionIndex: number;
   onCloseCardOptions: () => void;
-  onStartDemo: () => void;
   onOpenManual: () => void;
   onOpenSettings: () => void;
   onSetThemeMode: (mode: ThemeMode) => void;
@@ -84,7 +83,6 @@ export const MenuScreen: React.FC<MenuScreenProps> = React.memo(({
   settingsRowIndex,
   manualSectionIndex,
   onCloseCardOptions,
-  onStartDemo,
   onOpenManual,
   onOpenSettings,
   onSetThemeMode,
@@ -235,15 +233,6 @@ export const MenuScreen: React.FC<MenuScreenProps> = React.memo(({
           <h1 className="menu-heading">Documents ({docs.length})</h1>
         </div>
         <div className="menu-topbar-actions">
-          <button
-            type="button"
-            tabIndex={-1}
-            className={`menu-demo-btn ${menuFocusArea === 'DEMO' ? 'is-focused' : ''}`}
-            onClick={onStartDemo}
-            title="Start 19s timed Demo 3 (after 3s countdown)"
-          >
-            ▶ Starte Demo
-          </button>
           <button
             type="button"
             tabIndex={-1}
