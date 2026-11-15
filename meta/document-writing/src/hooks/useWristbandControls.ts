@@ -18,8 +18,8 @@ export interface WristbandControlHandlers {
   onGestureLog: (label: string, detail: string) => void;
 }
 
-const HOLD_THRESHOLD_MS = 260;
-const MULTI_TAP_WINDOW_MS = 400;
+const HOLD_THRESHOLD_MS = 250;
+const MULTI_TAP_WINDOW_MS = 430;
 const PRESS_DEDUP_MS = 80;
 
 export function useWristbandControls(handlers: WristbandControlHandlers) {
@@ -259,6 +259,27 @@ export function useWristbandControls(handlers: WristbandControlHandlers) {
       }
     };
 
+    const onPointerDown = (event: PointerEvent) => {
+      if (isTextElement(event.target) || isTextElement(document.activeElement)) {
+        return;
+      }
+      if (event.pointerType === 'mouse' && event.button !== 0) {
+        return;
+      }
+      beginTipPress('pointer');
+    };
+
+    const onPointerUp = (event: PointerEvent) => {
+      if (isTextElement(event.target) || isTextElement(document.activeElement)) {
+        return;
+      }
+      endTipPress('pointer');
+    };
+
+    const onPointerCancel = () => {
+      cancelTipPress();
+    };
+
     const onBlur = () => {
       if (activeHoldKindRef.current !== 'none') {
         cancelTipPress();
@@ -267,12 +288,18 @@ export function useWristbandControls(handlers: WristbandControlHandlers) {
 
     window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('keyup', onKeyUp, true);
+    window.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('pointerup', onPointerUp, true);
+    window.addEventListener('pointercancel', onPointerCancel, true);
     window.addEventListener('blur', onBlur);
 
     return () => {
       clearTimers();
       window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('keyup', onKeyUp, true);
+      window.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('pointerup', onPointerUp, true);
+      window.removeEventListener('pointercancel', onPointerCancel, true);
       window.removeEventListener('blur', onBlur);
     };
   }, [beginTipPress, cancelTipPress, clearTimers, endTipPress, triggerMiddleFingerBack]);

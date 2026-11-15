@@ -74,7 +74,6 @@ interface DocumentToolbarsProps {
   capabilityReport: InputCapabilityReport;
   showProbe: boolean;
   // Callbacks
-  onSelectModeDirect: (mode: DocInteractionMode) => void;
   onSelectDrawTop: (idx: number, submenu: Exclude<DrawSubmenu, null>) => void;
   onBackDrawSubmenu: () => void;
   onPickThickness: (px: number, idx: number) => void;
@@ -116,7 +115,6 @@ export const DocumentToolbars: React.FC<DocumentToolbarsProps> = ({
   writerInputRef,
   capabilityReport,
   showProbe,
-  onSelectModeDirect,
   onSelectDrawTop,
   onBackDrawSubmenu,
   onPickThickness,
@@ -466,7 +464,7 @@ export const DocumentToolbars: React.FC<DocumentToolbarsProps> = ({
 
       {/* Always-Visible Bottom Mode Bar */}
       <nav
-        className={`doc-mode-bar ${modeSelectorActive ? 'is-selecting-mode' : ''}`}
+        className={`doc-mode-bar ${modeSelectorActive ? 'is-selecting-mode is-window-active' : ''}`}
         aria-label="Document Modes"
       >
         {DOC_MODES.map((m, idx) => {
@@ -480,7 +478,6 @@ export const DocumentToolbars: React.FC<DocumentToolbarsProps> = ({
               className={`doc-mode-pill ${isCurrent ? 'is-active' : ''} ${
                 isHovered ? 'is-mode-hovered' : ''
               }`}
-              onClick={() => onSelectModeDirect(m.id)}
             >
               {m.label}
             </button>

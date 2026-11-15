@@ -10,7 +10,6 @@ import {
 } from './components/DocumentToolbars';
 import { MenuScreen } from './components/MenuScreen';
 import type { InputCapabilityReport } from './components/NeuralComposer';
-import { WristTelemetryHud } from './components/WristTelemetryHud';
 import { useWristbandControls } from './hooks/useWristbandControls';
 import { WristSensorController } from './services/wristSensor';
 import {
@@ -31,11 +30,8 @@ import {
   type DocInteractionMode,
   type DocShape,
   type DrawSubmenu,
-  type GestureEventRecord,
   type InkStroke,
   type ShapeType,
-  type ThemeMode,
-  type WristMappingMode,
   type WristTelemetry,
   type WriteSubmenu,
 } from './types/document';
@@ -46,12 +42,8 @@ const SETTINGS_STORAGE_KEY = 'neuraldoc-meta-settings-v2';
 const MIN_ZOOM = 1.0;
 const MAX_ZOOM = 3.5;
 const POINTER_SCALE = 360;
-const ZOOM_ROLL_SENSITIVITY = 0.032;
-const MODE_ROLL_STEP_DEG = 14;
 const CURSOR_SCRUB_STEP_DEG = 5;
 const ERASER_RADIUS = 16;
-const DOUBLE_HOLD_TRANSLATE_PX = 10;
-const DOUBLE_HOLD_ROLL_DEG = 6;
 const MAX_UNDO_HISTORY = 45;
 
 interface DocumentHistorySnapshot {
@@ -442,11 +434,8 @@ export function App() {
   const [showProbe, setShowProbe] = useState(false);
   const [rawInputEvents, setRawInputEvents] = useState<string[]>([]);
 
-  // Telemetry & Band Sim HUD state
+  // Telemetry & toast state
   const [telemetry, setTelemetry] = useState<WristTelemetry>(INITIAL_TELEMETRY);
-  const [lastGesture, setLastGesture] = useState<GestureEventRecord | null>(null);
-  const [simulatorFrame, setSimulatorFrame] = useState(false);
-  const [showEmulatorPanel, setShowEmulatorPanel] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   // Refs for sensor loops & gesture disambiguation
@@ -465,10 +454,9 @@ export function App() {
     | 'write-scrub'
   >('none');
 
+  const viewHoldIntentRef = useRef<'pending' | 'zoom' | 'pan'>('pending');
   const zoomOriginRef = useRef(1.0);
   const panOriginRef = useRef({ panX: 0, panY: 0 });
-  const pointerDragKindRef = useRef<'none' | 'pan' | 'draw'>('none');
-  const pointerPanStartRef = useRef({ clientX: 0, clientY: 0, panX: 0, panY: 0 });
 
   const penPosRef = useRef(penPos);
   penPosRef.current = penPos;
@@ -521,16 +509,6 @@ export function App() {
     setToast(msg);
     if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
     toastTimerRef.current = window.setTimeout(() => setToast(null), 1600);
-  }, []);
-
-  const logGesture = useCallback((label: string, detail: string) => {
-    const time = new Date().toLocaleTimeString([], {
-      hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
-    setLastGesture({ id: makeId('g'), label, detail, time });
   }, []);
 
   // Persist docs & settings
@@ -765,9 +743,13 @@ export function App() {
   );
 
   const handleCreateNewDoc = useCallback(() => {
-    const maxNum = docsRef.current.reduce((m, d) => Math.max(m, d.docNumber), 0);
+    const currentDocs = docsRef.current;
+    const maxNum = currentDocs.reduce((m, d) => Math.max(m, d.docNumber), 0);
     const created = createEmptyDocument(maxNum + 1);
-    setDocs(prev => sortDocsWithPinnedFirst([...prev, created]));
+    const nextDocs = [...currentDocs, created];
+    const createdIdx = nextDocs.length - 1;
+    setDocs(nextDocs);
+    setMenuSelectedIndex(createdIdx);
     openDocument(created.id);
     showToast(`Created Document ${created.docNumber}`);
   }, [openDocument, showToast]);
@@ -809,62 +791,110 @@ export function App() {
         if (!t.deltaPointing || screenRef.current !== 'DOCUMENT') return;
 
         const { dx, dy } = t.deltaPointing;
-        const hold = activeHoldRef.current;
+        const deltaPxX = dx * POINTER_SCALE;
+        const deltaPxY = dy * POINTER_SCALE;
+        const pointingPx = Math.hypot(deltaPxX, deltaPxY);
+        const absRoll = Math.abs(t.rollDeg);
 
-        // 1. Bottom Mode Bar hover via forearm roll (from View, Write, or Draw disambiguated)
-        if (hold === 'mode-select') {
-          const offset = Math.round(t.rollDeg / MODE_ROLL_STEP_DEG);
+        // 1. Disambiguate 2x Hold between Mode Selector (forearm roll) and Draw Eraser (translation)
+        if (activeHoldRef.current === 'double-pending') {
+          if (absRoll >= 3.5) {
+            activeHoldRef.current = 'mode-select';
+            setModeSelectorActive(true);
+          } else if (docModeRef.current === 'DRAW' && pointingPx >= 12) {
+            activeHoldRef.current = 'draw-erase';
+            eraseUndoPushedRef.current = false;
+            erasePrevPosRef.current = penPosRef.current;
+            setIsErasing(true);
+          } else {
+            return;
+          }
+        }
+
+        // 2. Bottom Mode Bar hover via forearm roll (activated ONLY by 2x Tap Hold + Rotate)
+        if (activeHoldRef.current === 'mode-select') {
+          const effectiveDeg =
+            absRoll <= 3.0 ? 0 : t.rollDeg > 0 ? t.rollDeg - 3.0 : t.rollDeg + 3.0;
+          const offset = Math.round(effectiveDeg / 9.0);
           const originIdx = DOC_MODES.findIndex(m => m.id === preSelectorModeRef.current);
           const nextIdx = Math.max(0, Math.min(DOC_MODES.length - 1, originIdx + offset));
-          hoveredModeIdxRef.current = nextIdx;
-          setHoveredModeIndex(nextIdx);
+          if (nextIdx !== hoveredModeIdxRef.current) {
+            hoveredModeIdxRef.current = nextIdx;
+            setHoveredModeIndex(nextIdx);
+          }
           return;
         }
 
+        const hold = activeHoldRef.current;
         const mode = docModeRef.current;
 
-        // 2. VIEW MODE: 1x Hold + Rotate = Zoom, 1x Hold + Move = Pan
-        if (mode === 'VIEW' && hold === 'view-zoom-pan') {
-          const rawZoom = zoomOriginRef.current + t.rollDeg * ZOOM_ROLL_SENSITIVITY;
-          const nextZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, rawZoom));
-          const scaleFactor = POINTER_SCALE / Math.max(1, nextZoom * 0.75);
-          const targetPan = clampPanToZoom(
-            panOriginRef.current.panX + dx * scaleFactor,
-            panOriginRef.current.panY + dy * scaleFactor,
-            nextZoom,
-          );
-          setZoom(nextZoom);
-          setPanX(targetPan.panX);
-          setPanY(targetPan.panY);
+        // 3. VIEW MODE: 1x Hold + Rotate = Zoom, 1x Hold + Move = Pan, Hover = Crosshair
+        if (mode === 'VIEW') {
+          if (hold === 'view-zoom-pan') {
+            if (viewHoldIntentRef.current === 'pending') {
+              if (absRoll >= 4.0 && pointingPx < Math.max(14, absRoll * 2.2)) {
+                viewHoldIntentRef.current = 'zoom';
+              } else if (pointingPx >= 8) {
+                viewHoldIntentRef.current = 'pan';
+              }
+            }
+
+            if (viewHoldIntentRef.current === 'zoom') {
+              const effectiveDeg =
+                absRoll <= 2.5 ? 0 : t.rollDeg > 0 ? t.rollDeg - 2.5 : t.rollDeg + 2.5;
+              const nextZoom = Math.max(
+                MIN_ZOOM,
+                Math.min(MAX_ZOOM, zoomOriginRef.current + effectiveDeg * 0.04),
+              );
+              const clamped = clampPanToZoom(
+                panOriginRef.current.panX,
+                panOriginRef.current.panY,
+                nextZoom,
+              );
+              setZoom(nextZoom);
+              setPanX(clamped.panX);
+              setPanY(clamped.panY);
+            } else if (viewHoldIntentRef.current === 'pan') {
+              const targetPen = clampA4Point(
+                drawOriginRef.current.x + deltaPxX,
+                drawOriginRef.current.y + deltaPxY,
+              );
+              const cur = penPosRef.current;
+              const smoothed = {
+                x: cur.x + (targetPen.x - cur.x) * 0.68,
+                y: cur.y + (targetPen.y - cur.y) * 0.68,
+              };
+              setPenPos(smoothed);
+
+              const targetPan = clampPanToZoom(
+                panOriginRef.current.panX - deltaPxX,
+                panOriginRef.current.panY - deltaPxY,
+                zoomRef.current,
+              );
+              setPanX(targetPan.panX);
+              setPanY(targetPan.panY);
+            }
+            return;
+          }
+
+          if (hold === 'none') {
+            const target = clampA4Point(
+              hoverOriginRef.current.x + deltaPxX,
+              hoverOriginRef.current.y + deltaPxY,
+            );
+            const cur = penPosRef.current;
+            const smoothed = {
+              x: cur.x + (target.x - cur.x) * 0.55,
+              y: cur.y + (target.y - cur.y) * 0.55,
+            };
+            setPenPos(smoothed);
+          }
           return;
         }
 
-        // 3. DRAW MODE
+        // 4. DRAW MODE
         if (mode === 'DRAW') {
-          const deltaPxX = dx * POINTER_SCALE;
-          const deltaPxY = dy * POINTER_SCALE;
-
-          // Disambiguate 2x Hold in Drawing mode between Eraser (translation) and Mode Select (roll)
-          if (hold === 'double-pending') {
-            if (Math.abs(t.rollDeg) >= DOUBLE_HOLD_ROLL_DEG) {
-              activeHoldRef.current = 'mode-select';
-              preSelectorModeRef.current = 'DRAW';
-              hoveredModeIdxRef.current = 1;
-              setHoveredModeIndex(1);
-              setModeSelectorActive(true);
-              return;
-            }
-            if (Math.hypot(deltaPxX, deltaPxY) >= DOUBLE_HOLD_TRANSLATE_PX) {
-              activeHoldRef.current = 'draw-erase';
-              eraseUndoPushedRef.current = false;
-              erasePrevPosRef.current = penPosRef.current;
-              setIsErasing(true);
-            } else {
-              return;
-            }
-          }
-
-          if (activeHoldRef.current === 'draw-erase') {
+          if (hold === 'draw-erase') {
             const nextPt = clampA4Point(
               drawOriginRef.current.x + deltaPxX,
               drawOriginRef.current.y + deltaPxY,
@@ -875,7 +905,7 @@ export function App() {
             return;
           }
 
-          if (activeHoldRef.current === 'draw-paint') {
+          if (hold === 'draw-paint') {
             const target = clampA4Point(
               drawOriginRef.current.x + deltaPxX,
               drawOriginRef.current.y + deltaPxY,
@@ -896,7 +926,7 @@ export function App() {
           }
 
           // Continuous Draw crosshair hover when not holding
-          if (activeHoldRef.current === 'none') {
+          if (hold === 'none') {
             const target = clampA4Point(
               hoverOriginRef.current.x + deltaPxX,
               hoverOriginRef.current.y + deltaPxY,
@@ -911,7 +941,7 @@ export function App() {
           return;
         }
 
-        // 4. WRITE MODE: 1x Hold + Rotate Arm scrubs character cursor along line
+        // 5. WRITE MODE: 1x Hold + Rotate Arm scrubs character cursor along line
         if (mode === 'WRITE' && hold === 'write-scrub') {
           const doc = activeDocRef.current;
           if (!doc) return;
@@ -1578,8 +1608,10 @@ export function App() {
 
     if (docMode === 'VIEW') {
       activeHoldRef.current = 'view-zoom-pan';
+      viewHoldIntentRef.current = 'pending';
       zoomOriginRef.current = zoomRef.current;
       panOriginRef.current = panRef.current;
+      drawOriginRef.current = penPosRef.current;
       return;
     }
 
@@ -1616,6 +1648,13 @@ export function App() {
     activeHoldRef.current = 'none';
     setIsCursorScrubbing(false);
 
+    if (hold === 'view-zoom-pan') {
+      viewHoldIntentRef.current = 'pending';
+      hoverOriginRef.current = penPosRef.current;
+      sensorRef.current?.clearReference();
+      return;
+    }
+
     if (hold === 'draw-paint') {
       const hadMovement =
         (activeStrokeRef.current?.points.length ?? 0) > 1 ||
@@ -1636,21 +1675,13 @@ export function App() {
   const handleTipDoubleHoldStart = useCallback(() => {
     if (screen !== 'DOCUMENT') return;
     sensorRef.current?.captureReference();
-
-    if (docMode === 'DRAW') {
-      activeHoldRef.current = 'double-pending';
-      drawOriginRef.current = penPosRef.current;
-      return;
-    }
-
-    // View & Write modes: 2x Hold + Rotate hovers modes along Bottom Mode Bar
-    activeHoldRef.current = 'mode-select';
-    preSelectorModeRef.current = docMode;
-    const idx = DOC_MODES.findIndex(m => m.id === docMode);
+    activeHoldRef.current = 'double-pending';
+    preSelectorModeRef.current = docModeRef.current;
+    const idx = DOC_MODES.findIndex(m => m.id === docModeRef.current);
     hoveredModeIdxRef.current = idx >= 0 ? idx : 0;
     setHoveredModeIndex(hoveredModeIdxRef.current);
-    setModeSelectorActive(true);
-  }, [docMode, screen]);
+    drawOriginRef.current = penPosRef.current;
+  }, [screen]);
 
   const handleTipDoubleHoldEnd = useCallback(() => {
     const hold = activeHoldRef.current;
@@ -1684,61 +1715,8 @@ export function App() {
     onTipDoubleHoldEnd: handleTipDoubleHoldEnd,
     onMiddleFingerBack: handleMiddleFingerBack,
     onUndoShortcut: handleUndo,
-    onGestureLog: logGesture,
+    onGestureLog: () => {},
   });
-
-  // Pointer/mouse canvas handlers (desktop testing & touch support)
-  const handleSheetPointerDown = useCallback(
-    (x: number, y: number, clientX: number, clientY: number) => {
-      if (docMode === 'VIEW') {
-        pointerDragKindRef.current = 'pan';
-        pointerPanStartRef.current = {
-          clientX,
-          clientY,
-          panX: panRef.current.panX,
-          panY: panRef.current.panY,
-        };
-      } else if (docMode === 'DRAW') {
-        pointerDragKindRef.current = 'draw';
-        const pt = clampA4Point(x, y);
-        setPenPos(pt);
-        beginDrawOrShapeAt(pt);
-      }
-    },
-    [beginDrawOrShapeAt, docMode],
-  );
-
-  const handleSheetPointerMove = useCallback(
-    (x: number, y: number, clientX: number, clientY: number, isDown: boolean) => {
-      if (docMode === 'DRAW') {
-        const pt = clampA4Point(x, y);
-        setPenPos(pt);
-        if (isDown && pointerDragKindRef.current === 'draw') {
-          updateDrawOrShapeAt(pt);
-        }
-        return;
-      }
-      if (docMode === 'VIEW' && isDown && pointerDragKindRef.current === 'pan') {
-        const dx = clientX - pointerPanStartRef.current.clientX;
-        const dy = clientY - pointerPanStartRef.current.clientY;
-        const nextPan = clampPanToZoom(
-          pointerPanStartRef.current.panX + dx,
-          pointerPanStartRef.current.panY + dy,
-          zoomRef.current,
-        );
-        setPanX(nextPan.panX);
-        setPanY(nextPan.panY);
-      }
-    },
-    [docMode, updateDrawOrShapeAt],
-  );
-
-  const handleSheetPointerUp = useCallback(() => {
-    if (pointerDragKindRef.current === 'draw') {
-      commitActiveInkOrShape();
-    }
-    pointerDragKindRef.current = 'none';
-  }, [commitActiveInkOrShape]);
 
   const handleSelectLine = useCallback(
     (lineIndex: number, charIndex?: number) => {
@@ -1775,7 +1753,7 @@ export function App() {
 
   return (
     <div
-      className={`glasses-viewport-host ${simulatorFrame ? 'has-sim-frame' : ''} ${
+      className={`glasses-viewport-host ${
         settings.themeMode === 'light' ? 'is-theme-light' : 'is-theme-transparent'
       }`}
     >
@@ -1784,55 +1762,6 @@ export function App() {
           screen === 'DOCUMENT' ? 'is-document-screen' : 'is-menu-screen'
         }`}
       >
-        <WristTelemetryHud
-          telemetry={telemetry}
-          screen={screen}
-          docMode={docMode}
-          wristMappingMode={settings.wristMappingMode}
-          lastGesture={lastGesture}
-          simulatorFrame={simulatorFrame}
-          showEmulatorPanel={showEmulatorPanel}
-          onToggleSimulatorFrame={() => setSimulatorFrame(v => !v)}
-          onToggleEmulatorPanel={() => setShowEmulatorPanel(v => !v)}
-          onSimulatedPose={(yaw, pitch, roll) =>
-            sensorRef.current?.pushSimulatedEuler(
-              (yaw * Math.PI) / 180,
-              (pitch * Math.PI) / 180,
-              (roll * Math.PI) / 180,
-            )
-          }
-          onStartHold1Sim={() => {
-            logGesture('Sim Hold 1x', 'Start');
-            handleTipHoldStart();
-          }}
-          onEndHold1Sim={() => {
-            logGesture('Sim Hold 1x', 'End');
-            handleTipHoldEnd();
-          }}
-          onStartHold2Sim={() => {
-            logGesture('Sim Hold 2x', 'Start');
-            handleTipDoubleHoldStart();
-          }}
-          onEndHold2Sim={() => {
-            logGesture('Sim Hold 2x', 'End');
-            handleTipDoubleHoldEnd();
-          }}
-          onSimSwipe={dir => {
-            logGesture(`Sim Swipe ${dir}`, 'Band Sim');
-            handleSwipe(dir);
-          }}
-          onSimTipTap={count => {
-            logGesture(`Sim Tap ${count}x`, 'Band Sim');
-            if (count === 1) handleTipSingleTap();
-            else if (count === 2) handleTipDoubleTap();
-            else handleTipTripleTap();
-          }}
-          onSimMiddleFingerBack={() => {
-            logGesture('Sim Middle Finger', 'Back');
-            handleMiddleFingerBack();
-          }}
-        />
-
         {(screen === 'MENU' || screen === 'SETTINGS') && (
           <MenuScreen
             screen={screen}
@@ -1845,21 +1774,6 @@ export function App() {
             deleteConfirmDocId={deleteConfirmDocId}
             deleteConfirmYes={deleteConfirmYes}
             settingsRowIndex={settingsRowIndex}
-            onSelectGear={() => {
-              setMenuFocusArea('GEAR');
-              setScreen('SETTINGS');
-              setSettingsRowIndex(0);
-              pushHistorySubstate();
-            }}
-            onOpenDoc={openDocument}
-            onCreateNewDoc={handleCreateNewDoc}
-            onTogglePinDoc={handleTogglePinDoc}
-            onRequestDeleteDoc={docId => {
-              setDeleteConfirmDocId(docId);
-              setDeleteConfirmYes(false);
-            }}
-            onConfirmDeleteDoc={handleConfirmDeleteDoc}
-            onCancelDeleteDoc={() => setDeleteConfirmDocId(null)}
             onCloseCardOptions={() => setCardOptionsDocId(null)}
             onSetThemeMode={themeMode => setSettings(s => ({ ...s, themeMode }))}
             onSetWristMappingMode={wristMappingMode =>
@@ -1875,6 +1789,7 @@ export function App() {
               doc={activeDoc}
               themeMode={settings.themeMode}
               mode={docMode}
+              isWindowActive={!modeSelectorActive}
               zoom={zoom}
               panX={panX}
               panY={panY}
@@ -1886,12 +1801,7 @@ export function App() {
               rollDeg={telemetry.rollDeg}
               isErasing={isErasing}
               isCursorScrubbing={isCursorScrubbing}
-              isLiveWristSensor={telemetry.status === 'live'}
               onSelectLine={handleSelectLine}
-              onSheetPointerDown={handleSheetPointerDown}
-              onSheetPointerMove={handleSheetPointerMove}
-              onSheetPointerUp={handleSheetPointerUp}
-              onSheetPointerCancel={handleSheetPointerUp}
             />
 
             <DocumentToolbars
@@ -1914,7 +1824,6 @@ export function App() {
               writerInputRef={writerInputRef}
               capabilityReport={capabilityReport}
               showProbe={showProbe}
-              onSelectModeDirect={enterDocMode}
               onSelectDrawTop={handleSelectDrawTop}
               onBackDrawSubmenu={() => setDrawSubmenu(null)}
               onPickThickness={(px, idx) => {

@@ -319,7 +319,7 @@ export const A4PaperView: React.FC<A4PaperViewProps> = ({
         {doc.shapes.map(shape => renderShapeElement(shape, shape.id, false))}
         {activeShape && renderShapeElement(activeShape, `${activeShape.id}-preview`, true)}
 
-        {!isThumbnail && mode === 'DRAW' && (
+        {!isThumbnail && (mode === 'DRAW' || mode === 'VIEW') && (
           <g transform={`translate(${penPos.x}, ${penPos.y})`}>
             {isErasing ? (
               <>

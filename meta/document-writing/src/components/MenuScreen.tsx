@@ -23,13 +23,6 @@ interface MenuScreenProps {
   deleteConfirmDocId: string | null;
   deleteConfirmYes: boolean;
   settingsRowIndex: 0 | 1;
-  onSelectGear: () => void;
-  onOpenDoc: (docId: string) => void;
-  onCreateNewDoc: () => void;
-  onTogglePinDoc: (docId: string) => void;
-  onRequestDeleteDoc: (docId: string) => void;
-  onConfirmDeleteDoc: (docId: string) => void;
-  onCancelDeleteDoc: () => void;
   onCloseCardOptions: () => void;
   onSetThemeMode: (mode: ThemeMode) => void;
   onSetWristMappingMode: (mode: WristMappingMode) => void;
@@ -47,13 +40,6 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
   deleteConfirmDocId,
   deleteConfirmYes,
   settingsRowIndex,
-  onSelectGear,
-  onOpenDoc,
-  onCreateNewDoc,
-  onTogglePinDoc,
-  onRequestDeleteDoc,
-  onConfirmDeleteDoc,
-  onCancelDeleteDoc,
   onCloseCardOptions,
   onSetThemeMode,
   onSetWristMappingMode,
@@ -143,12 +129,6 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
             </div>
           </div>
         </div>
-
-        <footer className="wristband-legend">
-          <span>↑↓ Select Setting</span>
-          <span>←→ / 1x Tip Change Option</span>
-          <span>Middle Finger / Esc Return to Menu</span>
-        </footer>
       </section>
     );
   }
@@ -157,14 +137,12 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
     <section className="menu-screen" aria-label="A4 Documents Explorer Menu">
       <div className="menu-topbar">
         <div className="menu-title-group">
-          <span className="menu-badge">A4 EXPLORER</span>
           <h1 className="menu-heading">Documents ({docs.length})</h1>
         </div>
         <button
           type="button"
           tabIndex={-1}
           className={`menu-gear-btn ${menuFocusArea === 'GEAR' ? 'is-focused' : ''}`}
-          onClick={onSelectGear}
           title="Settings (Swipe Up from cards)"
           aria-label="Open Settings"
         >
@@ -189,10 +167,6 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
               className={`explorer-doc-card ${isHovered ? 'is-hovered' : ''} ${
                 doc.pinned ? 'is-pinned' : ''
               }`}
-              onClick={() => {
-                if (showOptions || showDeleteConfirm) return;
-                onOpenDoc(doc.id);
-              }}
             >
               <div
                 className="explorer-thumb-frame"
@@ -225,7 +199,6 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
                       type="button"
                       tabIndex={-1}
                       className={`card-icon-action ${cardOptionIndex === 0 ? 'is-selected' : ''}`}
-                      onClick={() => onTogglePinDoc(doc.id)}
                       title={doc.pinned ? 'Unpin document' : 'Pin document to top'}
                     >
                       📌 {doc.pinned ? 'Unpin' : 'Pin'}
@@ -236,7 +209,6 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
                       className={`card-icon-action is-danger ${
                         cardOptionIndex === 1 ? 'is-selected' : ''
                       }`}
-                      onClick={() => onRequestDeleteDoc(doc.id)}
                       title="Delete document"
                     >
                       🗑️ Delete
@@ -263,7 +235,6 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
                         type="button"
                         tabIndex={-1}
                         className={`confirm-btn ${!deleteConfirmYes ? 'is-selected' : ''}`}
-                        onClick={onCancelDeleteDoc}
                       >
                         Cancel
                       </button>
@@ -271,7 +242,6 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
                         type="button"
                         tabIndex={-1}
                         className={`confirm-btn is-danger ${deleteConfirmYes ? 'is-selected' : ''}`}
-                        onClick={() => onConfirmDeleteDoc(doc.id)}
                       >
                         Delete
                       </button>
@@ -302,7 +272,6 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
           className={`explorer-doc-card explorer-new-card ${
             menuFocusArea === 'CARDS' && menuSelectedIndex === docs.length ? 'is-hovered' : ''
           }`}
-          onClick={onCreateNewDoc}
         >
           <div
             className="explorer-new-a4-sheet"
@@ -317,13 +286,6 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
           </div>
         </div>
       </div>
-
-      <footer className="wristband-legend">
-        <span>←→ Select Card</span>
-        <span>↑ Gear Settings</span>
-        <span>1x Tip Open / New</span>
-        <span>1x Hold Pin / Trash</span>
-      </footer>
     </section>
   );
 };
