@@ -39,8 +39,8 @@ import {
 
 const DOCS_STORAGE_KEY = 'neuraldoc-meta-a4-v2';
 const SETTINGS_STORAGE_KEY = 'neuraldoc-meta-settings-v2';
-const PHOTO_DOC_SEEDED_KEY = 'neuraldoc-meta-photo-seeded-pxl2';
-const PHOTO_BG_URL = `${import.meta.env.BASE_URL}PXL_20261115_040504936.jpg`;
+const PHOTO_DOC_SEEDED_KEY = 'neuraldoc-meta-photo-seeded-demo3';
+const PHOTO_BG_URL = `${import.meta.env.BASE_URL}photo-doc-bg.png`;
 
 const MIN_ZOOM = 1.0;
 const MAX_ZOOM = 3.5;
@@ -112,7 +112,213 @@ function createSeedDocuments(): A4Document[] {
   } catch {
     // Ignore storage errors
   }
-  return [createSeedPhotoDocument(1, now)];
+
+  const doc1Photo = createSeedPhotoDocument(1, now);
+
+  const doc2FullPage: A4Document = {
+    id: 'doc-full-notes',
+    docNumber: 2,
+    title: 'Document 2 — Architecture Notes',
+    pinned: false,
+    updatedAt: now - 1000,
+    cursor: { lineIndex: 0, charIndex: 0 },
+    blocks: [
+      {
+        id: 'blk-f1',
+        kind: 'h1',
+        text: 'AirCraft — Neural Wristband & HUD Spec',
+        bold: true,
+        fontSize: 20,
+      },
+      {
+        id: 'blk-f2',
+        kind: 'p',
+        text: 'AirCraft bridges Meta Ray-Ban Display glasses with surface EMG wristband telemetry so users can annotate photos and A4 sheets hands-free in any lighting condition.',
+        fontSize: 13,
+      },
+      {
+        id: 'blk-f3',
+        kind: 'h2',
+        text: '1. Core Interaction Pipeline',
+        bold: true,
+        fontSize: 15,
+      },
+      {
+        id: 'blk-f4',
+        kind: 'bullet',
+        text: 'Swipe gestures navigate the Explorer Menu, Manual, Settings, and bottom toolbars with deterministic focus.',
+        fontSize: 13,
+      },
+      {
+        id: 'blk-f5',
+        kind: 'bullet',
+        text: '1x Index Hold tracks wrist pitch and yaw at 60fps to paint smooth quadratic Bezier ink strokes or drag geometric shapes.',
+        fontSize: 13,
+      },
+      {
+        id: 'blk-f6',
+        kind: 'bullet',
+        text: '2x Tap Hold separates Zoom (vertical axis) from Panning (horizontal / 3rd axis) so zooming and dragging never conflict.',
+        fontSize: 13,
+      },
+      {
+        id: 'blk-f7',
+        kind: 'h2',
+        text: '2. Photo & Document Sync',
+        bold: true,
+        fontSize: 15,
+      },
+      {
+        id: 'blk-f8',
+        kind: 'p',
+        text: 'Captured glasses photos upload directly to the user repository and appear immediately alongside saved A4 notes. Every annotation layer is stored non-destructively in vector SVG coordinates.',
+        fontSize: 13,
+      },
+      {
+        id: 'blk-f9',
+        kind: 'bullet',
+        text: 'Undo history preserves up to 45 snapshots across both Drawing and Writing modes.',
+        fontSize: 13,
+      },
+      {
+        id: 'blk-f10',
+        kind: 'bullet',
+        text: 'Transparent HUD paper mode minimizes visual occlusion over real-world scenes.',
+        fontSize: 13,
+      },
+      {
+        id: 'blk-f11',
+        kind: 'quote',
+        text: 'Target latency: under 16ms per frame from EMG wrist sample to rendered A4 vector stroke.',
+        italic: true,
+        fontSize: 13,
+      },
+      {
+        id: 'blk-f12',
+        kind: 'p',
+        text: 'Next milestone: multi-page export, live collaborative cursors, and voice-assisted block formatting during field demos.',
+        fontSize: 13,
+      },
+    ],
+    strokes: [],
+    shapes: [],
+  };
+
+  const doc3BulletsAndDiagrams: A4Document = {
+    id: 'doc-bullets-diagrams',
+    docNumber: 3,
+    title: 'Document 3 — System Flow',
+    pinned: false,
+    updatedAt: now - 2000,
+    cursor: { lineIndex: 0, charIndex: 0 },
+    blocks: [
+      {
+        id: 'blk-bd1',
+        kind: 'h2',
+        text: 'Demo Flow Checklist',
+        bold: true,
+        fontSize: 17,
+      },
+      {
+        id: 'blk-bd2',
+        kind: 'bullet',
+        text: 'Capture photo or open synced workspace sheet',
+        fontSize: 14,
+      },
+      {
+        id: 'blk-bd3',
+        kind: 'bullet',
+        text: 'Annotate key regions with zoom and pen strokes',
+        fontSize: 14,
+      },
+      {
+        id: 'blk-bd4',
+        kind: 'bullet',
+        text: 'Export clean vector overlay for review',
+        fontSize: 14,
+      },
+    ],
+    strokes: [],
+    shapes: [
+      {
+        id: 'shp-seed-1',
+        kind: 'rectangle',
+        x1: 72,
+        y1: 455,
+        x2: 196,
+        y2: 530,
+        color: '#06b6d4',
+        strokeWidth: 4,
+      },
+      {
+        id: 'shp-seed-2',
+        kind: 'arrow',
+        x1: 206,
+        y1: 492,
+        x2: 266,
+        y2: 492,
+        color: '#f59e0b',
+        strokeWidth: 4,
+      },
+      {
+        id: 'shp-seed-3',
+        kind: 'circle',
+        x1: 278,
+        y1: 450,
+        x2: 368,
+        y2: 536,
+        color: '#10b981',
+        strokeWidth: 4,
+      },
+      {
+        id: 'shp-seed-4',
+        kind: 'arrow',
+        x1: 378,
+        y1: 492,
+        x2: 428,
+        y2: 492,
+        color: '#f59e0b',
+        strokeWidth: 4,
+      },
+      {
+        id: 'shp-seed-5',
+        kind: 'triangle',
+        x1: 436,
+        y1: 450,
+        x2: 512,
+        y2: 534,
+        color: '#a855f7',
+        strokeWidth: 4,
+      },
+    ],
+  };
+
+  const doc4JunctionBullets: A4Document = {
+    id: 'doc-junction-bullets',
+    docNumber: 4,
+    title: 'Document 4 — Junction',
+    pinned: false,
+    updatedAt: now - 3000,
+    cursor: { lineIndex: 0, charIndex: 0 },
+    blocks: [
+      {
+        id: 'blk-j1',
+        kind: 'bullet',
+        text: 'Breakfast is at 9am',
+        fontSize: 16,
+      },
+      {
+        id: 'blk-j2',
+        kind: 'bullet',
+        text: 'Main Challenge submission is until 10am',
+        fontSize: 16,
+      },
+    ],
+    strokes: [],
+    shapes: [],
+  };
+
+  return [doc1Photo, doc2FullPage, doc3BulletsAndDiagrams, doc4JunctionBullets];
 }
 
 function createEmptyDocument(docNumber: number): A4Document {
@@ -156,25 +362,14 @@ function loadSavedDocuments(): A4Document[] {
     );
     if (valid.length === 0) return createSeedDocuments();
 
-    const photoDocs = valid
-      .filter(
-        d =>
-          d.id === 'doc-photo-sample' ||
-          (typeof d.backgroundImage === 'string' && d.backgroundImage.length > 0),
-      )
-      .slice(0, 1)
-      .map(d => ({
-        ...d,
-        docNumber: 1,
-        title: 'Document 1 — Photo',
-        backgroundImage: PHOTO_BG_URL,
-      }));
+    const normalized = valid.map(d =>
+      d.id === 'doc-photo-sample' ||
+      (typeof d.backgroundImage === 'string' && d.backgroundImage.length > 0)
+        ? { ...d, backgroundImage: PHOTO_BG_URL }
+        : d,
+    );
 
-    if (photoDocs.length === 0) {
-      return createSeedDocuments();
-    }
-
-    return sortDocsWithPinnedFirst(photoDocs);
+    return sortDocsWithPinnedFirst(normalized);
   } catch {
     return createSeedDocuments();
   }
@@ -761,6 +956,27 @@ const HANDWRITING_GLYPHS: Record<string, HandwritingGlyphDef> = {
       ],
     ],
   },
+  p: {
+    advance: 1.0,
+    strokes: [
+      [
+        [0.18, 0.45],
+        [0.16, 0.78],
+        [0.14, 1.08],
+        [0.12, 1.29],
+      ],
+      [
+        [0.17, 0.52],
+        [0.38, 0.42],
+        [0.68, 0.44],
+        [0.84, 0.62],
+        [0.78, 0.86],
+        [0.50, 0.96],
+        [0.24, 0.92],
+        [0.16, 0.80],
+      ],
+    ],
+  },
   r: {
     advance: 0.8,
     strokes: [
@@ -821,6 +1037,19 @@ const HANDWRITING_GLYPHS: Record<string, HandwritingGlyphDef> = {
         [0.80, 0.46],
         [0.78, 0.82],
         [0.88, 0.95],
+      ],
+    ],
+  },
+  v: {
+    advance: 0.94,
+    strokes: [
+      [
+        [0.12, 0.45],
+        [0.26, 0.72],
+        [0.44, 0.96],
+        [0.46, 0.96],
+        [0.64, 0.72],
+        [0.84, 0.45],
       ],
     ],
   },
@@ -894,6 +1123,21 @@ const HANDWRITING_GLYPHS: Record<string, HandwritingGlyphDef> = {
       ],
     ],
   },
+  '!': {
+    advance: 0.55,
+    strokes: [
+      [
+        [0.52, 0.08],
+        [0.49, 0.36],
+        [0.46, 0.64],
+        [0.44, 0.74],
+      ],
+      [
+        [0.43, 0.91],
+        [0.47, 0.95],
+      ],
+    ],
+  },
 };
 
 function resampleHandwritingPoints(points: InkPoint[], stepPx = 1.8): InkPoint[] {
@@ -916,56 +1160,160 @@ function resampleHandwritingPoints(points: InkPoint[], stepPx = 1.8): InkPoint[]
   return out;
 }
 
+function buildHandwritingLineStrokes(
+  lineText: string,
+  opts: {
+    idPrefix: string;
+    startX: number;
+    baseY: number;
+    glyphW: number;
+    glyphH: number;
+    unitAdvance: number;
+    color: string;
+    baseWidth: number;
+  },
+): InkStroke[] {
+  const result: InkStroke[] = [];
+  let strokeCounter = 0;
+  let cursorX = opts.startX;
+
+  for (let i = 0; i < lineText.length; i += 1) {
+    const ch = lineText[i];
+    if (ch === ' ') {
+      cursorX += opts.unitAdvance * 0.58;
+      continue;
+    }
+    const glyph = HANDWRITING_GLYPHS[ch];
+    if (!glyph) {
+      cursorX += opts.unitAdvance * 0.7;
+      continue;
+    }
+
+    const baselineJitter = Math.sin(i * 1.9) * 0.45;
+    glyph.strokes.forEach(normStroke => {
+      const rawPoints: InkPoint[] = normStroke.map(([nx, ny]) => ({
+        x: cursorX + nx * opts.glyphW + (0.96 - ny) * 1.25,
+        y: opts.baseY + baselineJitter + ny * opts.glyphH,
+        width: opts.baseWidth,
+      }));
+      const points = resampleHandwritingPoints(rawPoints);
+      strokeCounter += 1;
+      result.push({
+        id: `${opts.idPrefix}-${strokeCounter}`,
+        color: opts.color,
+        baseWidth: opts.baseWidth,
+        brushType: 'brush',
+        points,
+      });
+    });
+
+    cursorX += glyph.advance * opts.unitAdvance;
+  }
+
+  return result;
+}
+
+function buildDemoWaveStrokes(): InkStroke[] {
+  const rawPts: InkPoint[] = [];
+  const startX = 115;
+  const endX = 445;
+  const centerY = 305;
+  const amp = 34;
+  const cycles = 2.6;
+  const steps = 110;
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps;
+    rawPts.push({
+      x: startX + (endX - startX) * t,
+      y: centerY - Math.sin(t * Math.PI * 2 * cycles) * amp,
+      width: 4.5,
+    });
+  }
+  return [
+    {
+      id: 'demo3-wave-1',
+      color: '#06b6d4',
+      baseWidth: 4.5,
+      brushType: 'pen',
+      points: resampleHandwritingPoints(rawPts, 2.2),
+    },
+  ];
+}
+
+function buildDemoArrowStrokes(): InkStroke[] {
+  // Points left-upward toward the 2nd Junction bullet ("Main Challenge submission is until 10am")
+  const shaftRaw: InkPoint[] = [
+    { x: 428, y: 122, width: 3.2 },
+    { x: 412, y: 118, width: 3.2 },
+    { x: 396, y: 113, width: 3.2 },
+    { x: 382, y: 109, width: 3.2 },
+  ];
+  const headRaw: InkPoint[] = [
+    { x: 395, y: 103, width: 3.2 },
+    { x: 382, y: 109, width: 3.2 },
+    { x: 392, y: 119, width: 3.2 },
+  ];
+  return [
+    {
+      id: 'demo3-arrow-shaft',
+      color: '#ff3b5c',
+      baseWidth: 3.2,
+      brushType: 'pen',
+      points: resampleHandwritingPoints(shaftRaw, 1.8),
+    },
+    {
+      id: 'demo3-arrow-head',
+      color: '#ff3b5c',
+      baseWidth: 3.2,
+      brushType: 'pen',
+      points: resampleHandwritingPoints(headRaw, 1.8),
+    },
+  ];
+}
+
+function buildDemoHeartStrokes(cx: number, cy: number, scale = 1.25): InkStroke[] {
+  // Parametric heart curve centered at (cx, cy)
+  const rawPts: InkPoint[] = [];
+  const steps = 84;
+  for (let i = 0; i <= steps; i += 1) {
+    const t = (i / steps) * Math.PI * 2;
+    const hx = 16 * Math.pow(Math.sin(t), 3);
+    const hy = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
+    rawPts.push({
+      x: cx + hx * scale,
+      y: cy + hy * scale,
+      width: 3.4,
+    });
+  }
+  return [
+    {
+      id: 'demo3-heart-1',
+      color: DEMO_PINK_INK,
+      baseWidth: 3.4,
+      brushType: 'brush',
+      points: resampleHandwritingPoints(rawPts, 1.6),
+    },
+  ];
+}
+
 function buildDemoHandwritingStrokes(): InkStroke[] {
   const startX = 278;
   const lineYs = [76, 111, 146] as const;
-  const glyphW = 6.6;
-  const glyphH = 15.2;
-  const unitAdvance = 7.2;
-  const baseWidth = 2.0;
-
   const result: InkStroke[] = [];
-  let strokeCounter = 0;
-  let globalCharIdx = 0;
 
   DEMO_HANDWRITING_LINES.forEach((lineText, lineIdx) => {
-    let cursorX = startX;
-    const baseY = lineYs[lineIdx];
-
-    for (let i = 0; i < lineText.length; i += 1) {
-      const ch = lineText[i];
-      if (ch === ' ') {
-        cursorX += unitAdvance * 0.58;
-        continue;
-      }
-
-      const glyph = HANDWRITING_GLYPHS[ch];
-      if (!glyph) {
-        cursorX += unitAdvance * 0.7;
-        continue;
-      }
-
-      const baselineJitter = Math.sin(globalCharIdx * 1.9) * 0.45;
-      glyph.strokes.forEach(normStroke => {
-        const rawPoints: InkPoint[] = normStroke.map(([nx, ny]) => ({
-          x: cursorX + nx * glyphW + (0.96 - ny) * 1.25,
-          y: baseY + baselineJitter + ny * glyphH,
-          width: baseWidth,
-        }));
-        const points = resampleHandwritingPoints(rawPoints);
-        strokeCounter += 1;
-        result.push({
-          id: `demo-hw-${strokeCounter}`,
-          color: DEMO_PINK_INK,
-          baseWidth,
-          brushType: 'brush',
-          points,
-        });
-      });
-
-      cursorX += glyph.advance * unitAdvance;
-      globalCharIdx += 1;
-    }
+    result.push(
+      ...buildHandwritingLineStrokes(lineText, {
+        idPrefix: `demo-hw-l${lineIdx}`,
+        startX,
+        baseY: lineYs[lineIdx],
+        glyphW: 6.6,
+        glyphH: 15.2,
+        unitAdvance: 7.2,
+        color: DEMO_PINK_INK,
+        baseWidth: 2.0,
+      }),
+    );
   });
 
   return result;
@@ -2024,16 +2372,82 @@ export function App() {
       demoRafRef.current = null;
     }
 
-    // Keep only the single Demo 2 captured photo document in the Menu
-    const freshPhotoDoc = createSeedPhotoDocument(1, Date.now());
-    const targetDocId = freshPhotoDoc.id;
-    const targetIdx = 0;
-    const nextDocs: A4Document[] = [freshPhotoDoc];
+    // Seed all 4 Demo 3 documents fresh so Menu matches the exact 4-document state
+    const nextDocs = createSeedDocuments();
+    const targetIdx = 3;
+    const targetDocId = nextDocs[targetIdx].id;
 
-    const handwritingStrokes = buildDemoHandwritingStrokes();
-    const totalHandwritingPoints = handwritingStrokes.reduce((sum, s) => sum + s.points.length, 0);
-    const hwStartPt = handwritingStrokes[0]?.points[0] ?? { x: 278, y: 80 };
-    const docEntryPenPos = { x: 400, y: 120 };
+    const waveStrokes = buildDemoWaveStrokes();
+    const waveTotalPts = waveStrokes.reduce((s, st) => s + st.points.length, 0);
+
+    const arrowStrokes = buildDemoArrowStrokes();
+    const arrowTotalPts = arrowStrokes.reduce((s, st) => s + st.points.length, 0);
+
+    const importantStrokes = buildHandwritingLineStrokes('important!', {
+      idPrefix: 'demo3-imp',
+      startX: 438,
+      baseY: 112,
+      glyphW: 6.4,
+      glyphH: 15,
+      unitAdvance: 7.0,
+      color: '#ff3b5c',
+      baseWidth: 2.0,
+    });
+    const importantTotalPts = importantStrokes.reduce((s, st) => s + st.points.length, 0);
+
+    const loveStrokes = buildHandwritingLineStrokes('I love you', {
+      idPrefix: 'demo3-love',
+      startX: 168,
+      baseY: 678,
+      glyphW: 9.2,
+      glyphH: 21,
+      unitAdvance: 10.2,
+      color: DEMO_PINK_INK,
+      baseWidth: 2.6,
+    });
+    const loveTotalPts = loveStrokes.reduce((s, st) => s + st.points.length, 0);
+
+    const heartStrokes = buildDemoHeartStrokes(338, 690, 1.15);
+    const heartTotalPts = heartStrokes.reduce((s, st) => s + st.points.length, 0);
+
+    const diagRect: DocShape = {
+      id: 'demo3-shape-rect',
+      kind: 'rectangle',
+      x1: 86,
+      y1: 445,
+      x2: 206,
+      y2: 525,
+      color: '#06b6d4',
+      strokeWidth: 4,
+    };
+    const diagArrow: DocShape = {
+      id: 'demo3-shape-arrow',
+      kind: 'arrow',
+      x1: 218,
+      y1: 485,
+      x2: 314,
+      y2: 485,
+      color: '#f59e0b',
+      strokeWidth: 4,
+    };
+    const diagCircle: DocShape = {
+      id: 'demo3-shape-circle',
+      kind: 'circle',
+      x1: 328,
+      y1: 440,
+      x2: 428,
+      y2: 530,
+      color: '#10b981',
+      strokeWidth: 4,
+    };
+
+    const setDocContent = (strokes: InkStroke[], shapes: DocShape[]) => {
+      setDocs(prev =>
+        prev.map(d =>
+          d.id === targetDocId ? { ...d, updatedAt: Date.now(), strokes, shapes } : d,
+        ),
+      );
+    };
 
     setDocs(nextDocs);
     setToast(null);
@@ -2042,8 +2456,10 @@ export function App() {
     setIsErasing(false);
     setCardOptionsDocId(null);
     setDeleteConfirmDocId(null);
+    setActiveDocId(null);
+    setScreen('MENU');
     setMenuFocusArea('CARDS');
-    setMenuSelectedIndex(targetIdx);
+    setMenuSelectedIndex(0);
     setZoom(1.0);
     setPanX(0);
     setPanY(0);
@@ -2053,16 +2469,10 @@ export function App() {
     setDemoPhase('COUNTDOWN');
 
     const t0 = performance.now() + 3000;
-    let committedStrokeCount = 0;
-    let stage:
-      | 'countdown'
-      | 'photo'
-      | 'menu-open'
-      | 'doc-open'
-      | 'doc-zoom'
-      | 'doc-write'
-      | 'doc-hold'
-      | 'menu-end' = 'countdown';
+    let committedArrowCount = -1;
+    let committedImpCount = -1;
+    let committedLoveCount = -1;
+    let stage = 'countdown';
 
     const tick = (now: number) => {
       const elapsedSec = (now - t0) / 1000;
@@ -2074,42 +2484,26 @@ export function App() {
         return;
       }
 
-      // t = 0.0s .. 3.8s: Camera flash capture & exact swipe onto "Open with AirCraft" at t = 3.0s
-      if (elapsedSec < 3.8) {
-        if (stage !== 'photo') {
-          stage = 'photo';
+      // t = 0.0s .. 1.0s: Menu visible with 4 documents; highlight 4th document before opening
+      if (elapsedSec < 1.0) {
+        if (stage !== 'menu-start') {
+          stage = 'menu-start';
           setDemoCountdownSec(null);
-          setDemoPhase('PHOTO_CAPTURE');
-          setDemoActionActive(false);
-        }
-        setDemoFlashOpacity(elapsedSec < 0.45 ? Math.max(0, 1 - elapsedSec / 0.45) : 0);
-        if (elapsedSec >= 3.0) {
-          setDemoActionActive(true);
-        }
-        demoRafRef.current = requestAnimationFrame(tick);
-        return;
-      }
-
-      // t = 3.8s .. 4.2s: Open Menu with only the captured photo visible and selected
-      if (elapsedSec < 4.2) {
-        if (stage !== 'menu-open') {
-          stage = 'menu-open';
-          setDemoFlashOpacity(0);
-          setDemoActionActive(false);
           setDemoPhase('RUNNING_UI');
           setScreen('MENU');
           setActiveDocId(null);
-          setCardOptionsDocId(null);
-          setDeleteConfirmDocId(null);
           setMenuFocusArea('CARDS');
+          setMenuSelectedIndex(0);
+        }
+        if (elapsedSec >= 0.45) {
           setMenuSelectedIndex(targetIdx);
         }
         demoRafRef.current = requestAnimationFrame(tick);
         return;
       }
 
-      // t = 4.2s .. 6.0s: Open photo inside Document View
-      if (elapsedSec < 6.0) {
+      // t = 1.0s .. 3.0s: Open 4th document (2 Junction bullets)
+      if (elapsedSec < 3.0) {
         if (stage !== 'doc-open') {
           stage = 'doc-open';
           setActiveDocId(targetDocId);
@@ -2119,108 +2513,237 @@ export function App() {
           setDrawSubmenu(null);
           setWriteSubmenu(null);
           setDrawTool('brush');
-          setSelectedBrush('brush');
-          setSelectedColor(DEMO_PINK_INK);
-          setSelectedThickness(2);
+          setSelectedBrush('pen');
+          setSelectedColor('#06b6d4');
+          setSelectedThickness(4);
           setZoom(1.0);
           setPanX(0);
           setPanY(0);
           setActiveStroke(null);
           setActiveShape(null);
           setIsErasing(false);
-          setPenPos(docEntryPenPos);
+          setPenPos(waveStrokes[0].points[0]);
         }
         demoRafRef.current = requestAnimationFrame(tick);
         return;
       }
 
-      // t = 6.0s .. 8.0s: Zoom into the top-right corner of the photo
-      if (elapsedSec < 8.0) {
-        stage = 'doc-zoom';
-        const u = Math.max(0, Math.min(1, (elapsedSec - 6.0) / 0.9));
-        const s = u * u * (3 - 2 * u);
-        const nextZoom = 1.0 + s * 1.85;
-        const clamped = clampPanToZoom(-320 * s, 380 * s, nextZoom, viewportSizeRef.current);
-        setZoom(nextZoom);
-        setPanX(clamped.panX);
-        setPanY(clamped.panY);
-        setPenPos({
-          x: docEntryPenPos.x + (hwStartPt.x - docEntryPenPos.x) * s,
-          y: docEntryPenPos.y + (hwStartPt.y - docEntryPenPos.y) * s,
-        });
+      // t = 3.0s .. 5.0s: Draw wave motion
+      if (elapsedSec < 5.0) {
+        stage = 'wave';
+        const p = Math.max(0, Math.min(1, (elapsedSec - 3.0) / 2.0));
+        const slice = sliceHandwritingProgress(waveStrokes, waveTotalPts, p);
+        setPenPos(slice.tip);
+        setActiveStroke(slice.active);
         demoRafRef.current = requestAnimationFrame(tick);
         return;
       }
 
-      // t = 8.0s .. 15.0s: Handwrite the 3-line glowing pink message evenly until t = 15.0s
-      if (elapsedSec < 15.0) {
-        if (stage !== 'doc-write') {
-          stage = 'doc-write';
-          const clamped = clampPanToZoom(-320, 380, 2.85, viewportSizeRef.current);
-          setZoom(2.85);
+      // t = 5.0s .. 6.0s: Hold wave before upper zoom
+      if (elapsedSec < 6.0) {
+        if (stage !== 'wave-done') {
+          stage = 'wave-done';
+          setActiveStroke(null);
+          setDocContent(waveStrokes, []);
+        }
+        demoRafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      // t = 6.0s .. 9.0s: Zoom into top part, draw arrow to 2nd bullet + "important!", then zoom out
+      if (elapsedSec < 9.0) {
+        if (elapsedSec < 6.6) {
+          stage = 'top-zoom-in';
+          const u = Math.max(0, Math.min(1, (elapsedSec - 6.0) / 0.6));
+          const s = u * u * (3 - 2 * u);
+          const nextZoom = 1.0 + s * 1.15;
+          const clamped = clampPanToZoom(-150 * s, 340 * s, nextZoom, viewportSizeRef.current);
+          setZoom(nextZoom);
+          setPanX(clamped.panX);
+          setPanY(clamped.panY);
+          setSelectedColor('#ff3b5c');
+          setPenPos(arrowStrokes[0].points[0]);
+        } else if (elapsedSec < 7.2) {
+          if (stage !== 'top-arrow') {
+            stage = 'top-arrow';
+            const clamped = clampPanToZoom(-150, 340, 2.15, viewportSizeRef.current);
+            setZoom(2.15);
+            setPanX(clamped.panX);
+            setPanY(clamped.panY);
+          }
+          const p = Math.max(0, Math.min(1, (elapsedSec - 6.6) / 0.6));
+          const slice = sliceHandwritingProgress(arrowStrokes, arrowTotalPts, p);
+          setPenPos(slice.tip);
+          setActiveStroke(slice.active);
+          if (slice.committed.length !== committedArrowCount) {
+            committedArrowCount = slice.committed.length;
+            setDocContent([...waveStrokes, ...slice.committed], []);
+          }
+        } else if (elapsedSec < 8.4) {
+          if (stage !== 'top-imp') {
+            stage = 'top-imp';
+            setActiveStroke(null);
+            setDocContent([...waveStrokes, ...arrowStrokes], []);
+          }
+          const p = Math.max(0, Math.min(1, (elapsedSec - 7.2) / 1.2));
+          const slice = sliceHandwritingProgress(importantStrokes, importantTotalPts, p);
+          setPenPos(slice.tip);
+          setActiveStroke(slice.active);
+          if (slice.committed.length !== committedImpCount) {
+            committedImpCount = slice.committed.length;
+            setDocContent([...waveStrokes, ...arrowStrokes, ...slice.committed], []);
+          }
+        } else {
+          if (stage !== 'top-zoom-out') {
+            stage = 'top-zoom-out';
+            setActiveStroke(null);
+            setDocContent([...waveStrokes, ...arrowStrokes, ...importantStrokes], []);
+          }
+          const u = Math.max(0, Math.min(1, (elapsedSec - 8.4) / 0.6));
+          const s = 1 - u * u * (3 - 2 * u);
+          const nextZoom = 1.0 + s * 1.15;
+          const clamped = clampPanToZoom(-150 * s, 340 * s, nextZoom, viewportSizeRef.current);
+          setZoom(nextZoom);
           setPanX(clamped.panX);
           setPanY(clamped.panY);
         }
-        const writeProgress = Math.max(0, Math.min(1, (elapsedSec - 8.0) / 7.0));
-        const slice = sliceHandwritingProgress(
-          handwritingStrokes,
-          totalHandwritingPoints,
-          writeProgress,
-        );
-        setPenPos(slice.tip);
-        setActiveStroke(slice.active);
-        if (slice.committed.length !== committedStrokeCount) {
-          committedStrokeCount = slice.committed.length;
-          setDocs(prev =>
-            prev.map(d =>
-              d.id === targetDocId ? { ...d, strokes: slice.committed } : d,
-            ),
+        demoRafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      // t = 9.0s .. 10.0s: Hold at 1.0x before drawing 3-shape diagram
+      if (elapsedSec < 10.0) {
+        if (stage !== 'top-done') {
+          stage = 'top-done';
+          setZoom(1.0);
+          setPanX(0);
+          setPanY(0);
+          setActiveStroke(null);
+          setDocContent([...waveStrokes, ...arrowStrokes, ...importantStrokes], []);
+        }
+        demoRafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      // t = 10.0s .. 13.0s: Draw 3-shape diagram on lower half of document
+      if (elapsedSec < 13.0) {
+        const preShapesStrokes = [...waveStrokes, ...arrowStrokes, ...importantStrokes];
+        if (elapsedSec < 11.0) {
+          stage = 'diag-1';
+          const p = Math.max(0.08, Math.min(1, (elapsedSec - 10.0) / 0.9));
+          const curX2 = diagRect.x1 + (diagRect.x2 - diagRect.x1) * p;
+          const curY2 = diagRect.y1 + (diagRect.y2 - diagRect.y1) * p;
+          setSelectedColor(diagRect.color);
+          setPenPos({ x: curX2, y: curY2 });
+          setActiveShape({ ...diagRect, x2: curX2, y2: curY2 });
+        } else if (elapsedSec < 12.0) {
+          if (stage !== 'diag-2') {
+            stage = 'diag-2';
+            setDocContent(preShapesStrokes, [diagRect]);
+          }
+          const p = Math.max(0.08, Math.min(1, (elapsedSec - 11.0) / 0.9));
+          const curX2 = diagArrow.x1 + (diagArrow.x2 - diagArrow.x1) * p;
+          setSelectedColor(diagArrow.color);
+          setPenPos({ x: curX2, y: diagArrow.y2 });
+          setActiveShape({ ...diagArrow, x2: curX2 });
+        } else {
+          if (stage !== 'diag-3') {
+            stage = 'diag-3';
+            setDocContent(preShapesStrokes, [diagRect, diagArrow]);
+          }
+          const p = Math.max(0.08, Math.min(1, (elapsedSec - 12.0) / 0.9));
+          const curX2 = diagCircle.x1 + (diagCircle.x2 - diagCircle.x1) * p;
+          const curY2 = diagCircle.y1 + (diagCircle.y2 - diagCircle.y1) * p;
+          setSelectedColor(diagCircle.color);
+          setPenPos({ x: curX2, y: curY2 });
+          setActiveShape({ ...diagCircle, x2: curX2, y2: curY2 });
+        }
+        demoRafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      // t = 13.0s .. 15.0s: Commit 3-shape diagram and hold before bottom zoom
+      if (elapsedSec < 15.0) {
+        if (stage !== 'diag-done') {
+          stage = 'diag-done';
+          setActiveShape(null);
+          setDocContent(
+            [...waveStrokes, ...arrowStrokes, ...importantStrokes],
+            [diagRect, diagArrow, diagCircle],
           );
         }
         demoRafRef.current = requestAnimationFrame(tick);
         return;
       }
 
-      // t = 15.0s .. 16.0s: Commit finished handwriting and hold for 1s
-      if (elapsedSec < 16.0) {
-        if (stage !== 'doc-hold') {
-          stage = 'doc-hold';
-          const lastStroke = handwritingStrokes[handwritingStrokes.length - 1];
-          const finalTip = lastStroke
-            ? lastStroke.points[lastStroke.points.length - 1]
-            : hwStartPt;
-          setPenPos({ x: finalTip.x, y: finalTip.y });
-          setActiveStroke(null);
-          committedStrokeCount = handwritingStrokes.length;
-          setDocs(prev =>
-            prev.map(d =>
-              d.id === targetDocId
-                ? { ...d, updatedAt: Date.now(), strokes: handwritingStrokes }
-                : d,
-            ),
-          );
+      // t = 15.0s .. 19.0s: Zoom into bottom edge, write "I love you" + draw heart, then zoom out
+      const baseStrokes = [...waveStrokes, ...arrowStrokes, ...importantStrokes];
+      const baseShapes = [diagRect, diagArrow, diagCircle];
+
+      if (elapsedSec < 19.0) {
+        if (elapsedSec < 15.65) {
+          stage = 'bot-zoom-in';
+          const u = Math.max(0, Math.min(1, (elapsedSec - 15.0) / 0.65));
+          const s = u * u * (3 - 2 * u);
+          const nextZoom = 1.0 + s * 1.3;
+          const clamped = clampPanToZoom(0, -360 * s, nextZoom, viewportSizeRef.current);
+          setZoom(nextZoom);
+          setPanX(clamped.panX);
+          setPanY(clamped.panY);
+          setSelectedColor(DEMO_PINK_INK);
+          setPenPos(loveStrokes[0].points[0]);
+        } else if (elapsedSec < 17.35) {
+          if (stage !== 'bot-love') {
+            stage = 'bot-love';
+            const clamped = clampPanToZoom(0, -360, 2.3, viewportSizeRef.current);
+            setZoom(2.3);
+            setPanX(clamped.panX);
+            setPanY(clamped.panY);
+          }
+          const p = Math.max(0, Math.min(1, (elapsedSec - 15.65) / 1.7));
+          const slice = sliceHandwritingProgress(loveStrokes, loveTotalPts, p);
+          setPenPos(slice.tip);
+          setActiveStroke(slice.active);
+          if (slice.committed.length !== committedLoveCount) {
+            committedLoveCount = slice.committed.length;
+            setDocContent([...baseStrokes, ...slice.committed], baseShapes);
+          }
+        } else if (elapsedSec < 18.35) {
+          if (stage !== 'bot-heart') {
+            stage = 'bot-heart';
+            setActiveStroke(null);
+            setDocContent([...baseStrokes, ...loveStrokes], baseShapes);
+          }
+          const p = Math.max(0, Math.min(1, (elapsedSec - 17.35) / 1.0));
+          const slice = sliceHandwritingProgress(heartStrokes, heartTotalPts, p);
+          setPenPos(slice.tip);
+          setActiveStroke(slice.active);
+        } else {
+          if (stage !== 'bot-zoom-out') {
+            stage = 'bot-zoom-out';
+            setActiveStroke(null);
+            setDocContent([...baseStrokes, ...loveStrokes, ...heartStrokes], baseShapes);
+          }
+          const u = Math.max(0, Math.min(1, (elapsedSec - 18.35) / 0.65));
+          const s = 1 - u * u * (3 - 2 * u);
+          const nextZoom = 1.0 + s * 1.3;
+          const clamped = clampPanToZoom(0, -360 * s, nextZoom, viewportSizeRef.current);
+          setZoom(nextZoom);
+          setPanX(clamped.panX);
+          setPanY(clamped.panY);
         }
         demoRafRef.current = requestAnimationFrame(tick);
         return;
       }
 
-      // t = 16.0s .. 17.6s: Return to Main Menu
-      if (elapsedSec < 17.6) {
-        if (stage !== 'menu-end') {
-          stage = 'menu-end';
-          setActiveStroke(null);
-          setActiveDocId(null);
-          setScreen('MENU');
-          setMenuFocusArea('CARDS');
-          setMenuSelectedIndex(targetIdx);
-        }
-        demoRafRef.current = requestAnimationFrame(tick);
-        return;
-      }
-
-      // t = 17.6s: Close / turn off UI completely
+      // t >= 19.0s: Demo finished cleanly at 1.0x full document view
+      setZoom(1.0);
+      setPanX(0);
+      setPanY(0);
+      setActiveStroke(null);
+      setActiveShape(null);
+      setDocContent([...baseStrokes, ...loveStrokes, ...heartStrokes], baseShapes);
       demoRafRef.current = null;
-      setDemoPhase('UI_OFF');
     };
 
     demoRafRef.current = requestAnimationFrame(tick);
